@@ -1,0 +1,99 @@
+{
+  "name": "dsh-geek2api",
+  "version": "0.1.0",
+  "packageManager": "pnpm@10.32.1",
+  "description": "Use Geek2API API keys in DeepSeek Harness: a built-in multi-protocol model route with key rotation, multi-endpoint failover, and balance display",
+  "type": "module",
+  "main": "./lib/index.js",
+  "icon": "./icon-geek2api.webp",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./lib/client.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "icon-geek2api.webp",
+    "lib/*.js",
+    "cordis.patch.yml",
+    "README.md",
+    "README.en.md",
+    "docs/assets/dsh-geek2api-mascot.png",
+    "AGENTS.md",
+    "CHANGELOG.md",
+    "SECURITY.md",
+    "compatibility.json",
+    "LICENSE"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-connection",
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-conversation",
+        "@deepseek-ai/dsh-client-ui-model-selection",
+        "@deepseek-ai/dsh-client-ui-settings"
+      ],
+      "platform": "web"
+    }
+  },
+  "scripts": {
+    "build": "tsdown --config tsdown.config.mjs",
+    "test": "node --test tests/*.test.mjs",
+    "check": "pnpm run test && pnpm run build && pnpm pack --pack-destination .artifacts"
+  },
+  "keywords": [
+    "dsh-plugin",
+    "deepseek-harness",
+    "geek2api",
+    "sub2api",
+    "api-key",
+    "balance",
+    "llm"
+  ],
+  "author": "Geek2API",
+  "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": "^22.19.0 || >=24.0.0"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "4.0.1 || 4.0.2 || 4.0.3 || 4.0.4",
+    "@deepseek-ai/dsh-client-connection": ">=0.1.5-rc.1 <0.3.0-0",
+    "@deepseek-ai/dsh-client-locale": ">=0.1.5-rc.1 <0.3.0-0",
+    "@deepseek-ai/dsh-client-ui-conversation": ">=0.1.5-rc.1 <0.3.0-0",
+    "@deepseek-ai/dsh-client-ui-model-selection": ">=0.1.5-rc.1 <0.3.0-0",
+    "@deepseek-ai/dsh-client-ui-settings": ">=0.1.5-rc.1 <0.3.0-0",
+    "@deepseek-ai/dsh-credentials": ">=0.1.5-rc.1 <0.3.0-0",
+    "@deepseek-ai/dsh-llm": ">=0.1.5-rc.1 <0.3.0-0",
+    "@deepseek-ai/dsh-llm-pi-ai": ">=0.1.5-rc.1 <0.3.0-0",
+    "@deepseek-ai/dsh-settings": ">=0.1.5-rc.1 <0.3.0-0",
+    "@deepseek-ai/dsh-tools": ">=0.1.5-rc.1 <0.3.0-0",
+    "@deepseek-ai/schemastery": "^3.18.4",
+    "@earendil-works/pi-ai": "0.85.1 || 0.86.0 || 0.86.1 || 0.87.0 || 0.87.1",
+    "react": "^18.2.0"
+  },
+  "devDependencies": {
+    "@deepseek-ai/cordis": "4.0.2",
+    "@deepseek-ai/dsh-brand": "0.1.5-rc.3",
+    "@deepseek-ai/dsh-client-connection": "0.1.5-rc.3",
+    "@deepseek-ai/dsh-credentials": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-invariants": "0.1.5-rc.3",
+    "@deepseek-ai/dsh-llm": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-llm-pi-ai": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-scope": "0.1.5-rc.3",
+    "@deepseek-ai/dsh-settings": "0.1.5-rc.2",
+    "@deepseek-ai/dsh-tools": "0.1.5-rc.2",
+    "@deepseek-ai/schemastery": "3.18.4",
+    "@earendil-works/pi-ai": "0.85.1",
+    "geek2api-host-v020-fixture": "file:tests/fixtures/host-v020",
+    "react": "18.3.1",
+    "tsdown": "0.22.2",
+    "yaml": "2.9.1"
+  }
+}

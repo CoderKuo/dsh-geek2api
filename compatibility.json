@@ -1,0 +1,13 @@
+{
+  "latestTested": "0.1.5-rc.2",
+  "acceptedRuntimeRange": ">=0.1.5-rc.1 <0.3.0-0",
+  "supported": [
+    "0.1.5-rc.2",
+    "0.2.0-rc.2"
+  ],
+  "piAi": "0.85.1",
+  "validation": {
+    "0.1.5-rc.2": "313 offline tests on Linux (node 22) against the published host packages: host pool ranking, cooldown and failover; /v1/usage wallet, subscription and key-quota parsing; wallet dedupe in totals; per-key coverage from /v1/models; sub2api failure wording; the real PiAiAdapter resolving every catalog model, forcing 'off' for non-reasoning models, and retrying on the next host after a transport failure. Live smoke against the gateway with seven keys: endpoint probing, balance and coverage per key, and one answer each from Claude Opus 5.5, Claude Haiku 4.5, GPT-6.1 Sol, GPT-6 Astra, GPT-6 Luna, DeepSeek V4.1 Flash, Grok 4.6, Gemini 3.8 Flash and GLM-5.3; Claude and GPT web search backends answered with sources.",
+    "0.2.0-rc.2": "Declared in the accepted range and covered by the bundled 0.2.0-rc.2 host fixture tests; not yet booted in a live DSH desktop."
+  }
+}

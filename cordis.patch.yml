@@ -1,0 +1,7 @@
+# Register the Geek2API API-key model route and its settings surface.
+# The route is self-contained: the plugin builds its own adapter, model
+# catalog, credential key ring, and balance reader, so the user configures
+# nothing but their API keys.
+- insert:
+    - id: geek2api
+      name: 'dsh-geek2api'
