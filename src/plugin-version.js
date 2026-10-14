@@ -2,10 +2,12 @@
  * Version self-knowledge for the settings panel.
  *
  * The running version comes from this package. The latest version comes from
- * the npm registry. An in-place update is only offered for a registry install,
- * and it installs that exact version with the host's own pnpm — never through
- * `dsh plugin --profile desktop`, which the desktop app refuses. Registry
- * bodies and package-manager output stay host-side.
+ * the GitHub releases of this repository: the newest non-draft release names
+ * the version in its tag and carries the packed tarball as an asset. An
+ * in-place update is offered for an install from a release tarball (or the
+ * npm registry), and it installs that exact tarball with the host's own pnpm
+ * — never through `dsh plugin --profile desktop`, which the desktop app
+ * refuses. Release bodies and package-manager output stay host-side.
  *
  * @module dsh-geek2api/plugin-version
  */
@@ -23,7 +25,10 @@ import { ambientFetch, boundedFetch } from './request.js'
 export { ambientFetch, waitForSharedRequest } from './request.js'
 
 export const PACKAGE_NAME = 'dsh-geek2api'
-export const NPM_REGISTRY_LATEST_URL = `https://registry.npmjs.org/${PACKAGE_NAME}/latest`
+export const GITHUB_REPOSITORY = 'CoderKuo/dsh-geek2api'
+export const GITHUB_LATEST_RELEASE_URL = `https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/latest`
+/** The tarball asset a release must carry for an in-place update. */
+export const releaseAssetName = version => `${PACKAGE_NAME}-${version}.tgz`
 export const DEFAULT_VERSION_TTL_MS = 5 * 60_000
 export const DEFAULT_VERSION_TIMEOUT_MS = 10_000
 export const DEFAULT_UPDATE_TIMEOUT_MS = 180_000
@@ -54,14 +59,36 @@ export function compareSemver(a, b) {
 }
 
 /**
- * Classify how the running package reached the profile. Only registry specs
- * may be updated in place; local checkouts belong to the owner's iteration.
+ * Classify how the running package reached the profile. Registry specs and
+ * packed tarballs (a release download, or a local `.tgz`) may be updated in
+ * place; local checkouts belong to the owner's iteration.
  */
-function classifySpec(spec) {
+export function classifySpec(spec) {
   if (typeof spec !== 'string' || spec === '') return 'unknown'
+  if (/\.tgz(?:[?#].*)?$/iu.test(spec) && /^(?:https:\/\/|file:)/iu.test(spec)) return 'release'
   if (/^(?:link|file):/u.test(spec)) return 'link'
   if (/^(?:\d|[~^*])/u.test(spec)) return 'npm'
   return 'unknown'
+}
+
+/** Install kinds the panel may update in place. */
+export const UPDATABLE_KINDS = Object.freeze(['npm', 'release'])
+
+/**
+ * Normalize a GitHub "latest release" body.
+ * @param payload - the API body.
+ * @returns `{ version, tarballUrl, releaseUrl }`, or undefined when unusable.
+ */
+export function parseLatestRelease(payload) {
+  if (payload === null || typeof payload !== 'object' || payload.draft === true || payload.prerelease === true) return undefined
+  const version = typeof payload.tag_name === 'string' ? payload.tag_name.replace(/^v/u, '') : undefined
+  if (parseSemver(version) === undefined) return undefined
+  const asset = Array.isArray(payload.assets)
+    ? payload.assets.find(item => item?.name === releaseAssetName(version) && typeof item.browser_download_url === 'string')
+    : undefined
+  const tarballUrl = asset !== undefined && /^https:\/\/github\.com\//u.test(asset.browser_download_url) ? asset.browser_download_url : undefined
+  const releaseUrl = typeof payload.html_url === 'string' && /^https:\/\/github\.com\//u.test(payload.html_url) ? payload.html_url : undefined
+  return { version, ...(tarballUrl === undefined ? {} : { tarballUrl }), ...(releaseUrl === undefined ? {} : { releaseUrl }) }
 }
 
 const readManifest = async path => {
@@ -217,7 +244,7 @@ export function createGeek2APIPluginManager({
   argv = process.argv,
   env = process.env,
   ownPackageJsonUrl = new URL('../package.json', import.meta.url),
-  registryUrl = NPM_REGISTRY_LATEST_URL,
+  releaseUrl = GITHUB_LATEST_RELEASE_URL,
   now = Date.now,
   ttlMs = DEFAULT_VERSION_TTL_MS,
   timeoutMs = DEFAULT_VERSION_TIMEOUT_MS,
@@ -230,23 +257,26 @@ export function createGeek2APIPluginManager({
   const launcher = resolveLauncher({ argv, execPath })
   let updating = false
 
+  /** The newest release: its version, tarball asset, and page. */
   const fetchLatest = async signal => {
     let response
     try {
-      response = await boundedFetch(registryUrl, { headers: { Accept: 'application/json' } }, { fetchImpl, timeoutMs, signal })
+      response = await boundedFetch(releaseUrl, {
+        headers: { Accept: 'application/vnd.github+json', 'User-Agent': PACKAGE_NAME, 'X-GitHub-Api-Version': '2022-11-28' },
+      }, { fetchImpl, timeoutMs, signal })
     } catch (error) {
       if (error.aborted) throw error.cause
       throw new Error('Geek2API plugin version check failed')
     }
     if (!response.ok) throw new Error('Geek2API plugin version check failed')
-    let version
+    let release
     try {
-      version = (await response.json())?.version
+      release = parseLatestRelease(await response.json())
     } catch {
-      version = undefined
+      release = undefined
     }
-    if (parseSemver(version) === undefined) throw new Error('Geek2API plugin version check failed')
-    return version
+    if (release === undefined) throw new Error('Geek2API plugin version check failed')
+    return release
   }
 
   const readOwnVersion = async () => {
@@ -264,8 +294,10 @@ export function createGeek2APIPluginManager({
     ])
     return {
       current,
-      latest,
-      updateAvailable: compareSemver(latest, current) === 1,
+      latest: latest.version,
+      ...(latest.releaseUrl === undefined ? {} : { releaseUrl: latest.releaseUrl }),
+      updateAvailable: compareSemver(latest.version, current) === 1,
+      updatable: latest.tarballUrl !== undefined && UPDATABLE_KINDS.includes(install.kind),
       install,
       fetchedAt: now(),
     }
@@ -283,10 +315,11 @@ export function createGeek2APIPluginManager({
       try {
         const install = await findInstall({ dshHome, ownPackageJsonUrl })
         if (install.kind === 'link') throw new Error('Geek2API plugin is installed from a local checkout')
-        if (install.kind !== 'npm' || install.profile === undefined) {
+        if (!UPDATABLE_KINDS.includes(install.kind) || install.profile === undefined) {
           throw new Error('Geek2API plugin update could not find the owning profile')
         }
         const latest = await fetchLatest(signal)
+        if (latest.tarballUrl === undefined) throw new Error('Geek2API plugin release has no package to install')
         const profileDir = join(dshHome, 'profiles', install.profile)
         let result
         try {
@@ -294,8 +327,8 @@ export function createGeek2APIPluginManager({
             command: launcher.command,
             args: [
               ...launcher.prefix,
-              'add', '--save-exact', `--config.minimumReleaseAge=${UPDATE_RELEASE_AGE_MINUTES}`,
-              `${PACKAGE_NAME}@${latest}`,
+              'add', `--config.minimumReleaseAge=${UPDATE_RELEASE_AGE_MINUTES}`,
+              `${PACKAGE_NAME}@${latest.tarballUrl}`,
             ],
             cwd: profileDir,
           }, { signal, timeoutMs: updateTimeoutMs })
@@ -304,9 +337,9 @@ export function createGeek2APIPluginManager({
           throw new Error('Geek2API plugin update failed')
         }
         if (result.code !== 0) throw new Error('Geek2API plugin update failed')
-        await confirmInstalled({ profileDir, expected: latest, settleDelayMs })
+        await confirmInstalled({ profileDir, expected: latest.version, settleDelayMs })
         cache.invalidate()
-        return { version: latest, profile: install.profile }
+        return { version: latest.version, profile: install.profile }
       } finally {
         updating = false
       }

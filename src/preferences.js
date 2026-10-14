@@ -7,8 +7,8 @@
  * - DSH 0.2 has no sections: a preference is a *volatile* Config field of the
  *   plugin's own row, read through a live reference, written through
  *   `settings.update(rowId, patch)`, and announced by `loader/volatile-update`.
- *   Only volatile fields are writable there, so the host overrides stay
- *   read-only while web search and model visibility are editable.
+ *   Only volatile fields are writable there; the endpoint list, Claude
+ *   runtime, web search, and model visibility are all volatile.
  *
  * @module dsh-geek2api/preferences
  */

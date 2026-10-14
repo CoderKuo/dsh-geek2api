@@ -197,7 +197,7 @@ test('an exhausted key moves aside through the shared sink and the next key answ
   assert.equal(result.sources.length, 2)
   assert.deepEqual(used, ['sk-first-key-0001', 'sk-second-key-0002'])
   assert.equal(failures.length, 1)
-  assert.equal(failures[0].kind, 'quota')
+  assert.equal(failures[0].kind, 'exhausted')
   assert.equal(failures[0].key, 'sk-first-key-0001')
   assert.equal(typeof failures[0].id, 'string')
 })
@@ -234,7 +234,7 @@ test('a client-policy refusal is explained and blames no key', async () => {
     ring,
     hosts: stubHostPool(createHostPool, ['https://gw.example']),
     onKeyFailure: kind => failures.push(kind),
-    fetchImpl: async () => json(403, { error: { message: '请使用标准 codex 客户端' } }),
+    fetchImpl: async () => json(403, { error: { message: 'This API endpoint is only accessible via the official Claude CLI' } }),
   })
   await assert.rejects(provider.search({ query: 'q' }), /拒绝了这个客户端/u)
   assert.deepEqual(failures, [])

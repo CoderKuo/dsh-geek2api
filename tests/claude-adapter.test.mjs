@@ -253,7 +253,7 @@ test('an official-CLI refusal from a key without a Claude group blames the key, 
       runner: {
         async *stream() {
           yield { type: 'key', label: 'no-cc', model: 'claude-opus-5-5', groups: ['codex'], required: ['cc'], covers: false }
-          throw new Error('Claude Code CLI failed: API Error: 400 当前令牌未覆盖供应商 "Anthropic"（模型=claude-opus-5-5，已选分组=[codex]） (request id: r2)')
+          throw new Error("Claude Code CLI failed: API Error: 400 Model 'claude-opus-5-5' is not available. Use GET /v1/models to see supported models. (request id: r2)")
         },
       },
     })

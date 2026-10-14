@@ -1,0 +1,56 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Build and attach the package
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.32.1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.20.0
+          cache: pnpm
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Refuse a tag that does not match package.json
+        run: |
+          node <<'EOF'
+          const version = require('./package.json').version
+          const tag = process.env.GITHUB_REF_NAME.replace(/^v/, '')
+          if (version !== tag) {
+            console.error(`tag v${tag} does not match package.json ${version}`)
+            process.exit(1)
+          }
+          EOF
+      - name: Test, build, and pack
+        run: pnpm run check
+      - name: Refuse a stale lib/ build
+        run: git diff --exit-code -- lib/
+      - name: Create or update the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          ASSET=".artifacts/dsh-geek2api-${VERSION}.tgz"
+          test -f "$ASSET"
+          # An unversioned copy gives a stable install address:
+          # https://github.com/CoderKuo/dsh-geek2api/releases/latest/download/dsh-geek2api.tgz
+          cp "$ASSET" .artifacts/dsh-geek2api.tgz
+          NOTES="$(awk -v v="## ${VERSION}" '$0==v{f=1;next} /^## /{f=0} f' CHANGELOG.md)"
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" "$ASSET" .artifacts/dsh-geek2api.tgz --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" "$ASSET" .artifacts/dsh-geek2api.tgz --title "dsh-geek2api v${VERSION}" --notes "$NOTES"
+          fi

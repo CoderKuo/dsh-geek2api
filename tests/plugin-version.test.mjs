@@ -7,9 +7,11 @@ import test from 'node:test'
 
 import {
   compareSemver,
+  classifySpec,
   createGeek2APIPluginManager,
-  NPM_REGISTRY_LATEST_URL,
+  GITHUB_LATEST_RELEASE_URL,
   PACKAGE_NAME,
+  parseLatestRelease,
   parseSemver,
   resolvePnpm,
 } from '../src/plugin-version.js'
@@ -43,7 +45,27 @@ async function linkInstall(root, version = '1.0.3') {
   return pathToFileURL(join(checkout, 'package.json'))
 }
 
-const registryOk = version => async () => ({ ok: true, status: 200, async json() { return { version } } })
+const tarballUrl = version => `https://github.com/CoderKuo/dsh-geek2api/releases/download/v${version}/${PACKAGE_NAME}-${version}.tgz`
+const releasePage = version => `https://github.com/CoderKuo/dsh-geek2api/releases/tag/v${version}`
+/** The GitHub "latest release" body for `version`, with its tarball asset. */
+const releaseBody = version => ({
+  tag_name: `v${version}`,
+  html_url: releasePage(version),
+  draft: false,
+  prerelease: false,
+  assets: [{ name: `${PACKAGE_NAME}-${version}.tgz`, browser_download_url: tarballUrl(version) }],
+})
+const registryOk = version => async () => ({ ok: true, status: 200, async json() { return releaseBody(version) } })
+
+/** Fake DSH home whose `web` profile installed a release tarball. */
+async function releaseInstall(root, version = '1.0.3') {
+  const installedDir = join(root, 'profiles', 'web', 'node_modules', PACKAGE_NAME)
+  await writeManifest(join(root, 'profiles', 'web', 'package.json'), {
+    dependencies: { [PACKAGE_NAME]: tarballUrl(version) },
+  })
+  await writeManifest(join(installedDir, 'package.json'), { name: PACKAGE_NAME, version })
+  return pathToFileURL(join(installedDir, 'package.json'))
+}
 
 const rpc = pluginManager => createGeek2APIRpc({
   ring: {},
@@ -63,7 +85,27 @@ test('semver parsing and comparison drive the update badge', () => {
   assert.equal(compareSemver('not-a-version', '1.0.3'), undefined)
 })
 
-test('version check asks the registry for an uncompressed document', async () => {
+test('install specs: release tarballs and registry versions update in place, checkouts do not', () => {
+  assert.equal(classifySpec(tarballUrl('1.0.3')), 'release')
+  assert.equal(classifySpec('file:C:/Downloads/dsh-geek2api-1.0.3.tgz'), 'release')
+  assert.equal(classifySpec('link:../../checkout'), 'link')
+  assert.equal(classifySpec('file:../checkout'), 'link')
+  assert.equal(classifySpec('1.0.3'), 'npm')
+  assert.equal(classifySpec('github:someone/else'), 'unknown')
+})
+
+test('the latest release names its version, tarball, and page; drafts and foreign links are ignored', () => {
+  assert.deepEqual(parseLatestRelease(releaseBody('1.0.4')), { version: '1.0.4', tarballUrl: tarballUrl('1.0.4'), releaseUrl: releasePage('1.0.4') })
+  assert.equal(parseLatestRelease({ ...releaseBody('1.0.4'), draft: true }), undefined)
+  assert.equal(parseLatestRelease({ ...releaseBody('1.0.4'), prerelease: true }), undefined)
+  assert.equal(parseLatestRelease({ ...releaseBody('1.0.4'), tag_name: 'latest' }), undefined)
+  const foreign = parseLatestRelease({ ...releaseBody('1.0.4'), assets: [{ name: `${PACKAGE_NAME}-1.0.4.tgz`, browser_download_url: 'https://evil.example/x.tgz' }] })
+  assert.deepEqual(foreign, { version: '1.0.4', releaseUrl: releasePage('1.0.4') })
+  const wrongAsset = parseLatestRelease({ ...releaseBody('1.0.4'), assets: [{ name: `${PACKAGE_NAME}-1.0.3.tgz`, browser_download_url: tarballUrl('1.0.3') }] })
+  assert.equal(wrongAsset.tarballUrl, undefined)
+})
+
+test('version check asks GitHub for an uncompressed document', async () => {
   const root = await mkdtemp(join(tmpdir(), 'geek2api-version-encoding-'))
   const ownPackageJsonUrl = await npmInstall(root, '1.0.3')
   const original = globalThis.fetch
@@ -73,7 +115,7 @@ test('version check asks the registry for an uncompressed document', async () =>
     if (acceptEncoding !== 'identity') {
       return { ok: true, status: 200, async json() { throw new SyntaxError('gzip body') } }
     }
-    return { ok: true, status: 200, async json() { return { version: '1.0.3' } } }
+    return { ok: true, status: 200, async json() { return releaseBody('1.0.3') } }
   }
   try {
     const value = await createGeek2APIPluginManager({
@@ -88,7 +130,7 @@ test('version check asks the registry for an uncompressed document', async () =>
   }
 })
 
-test('version read combines own manifest, registry latest, and the owning npm profile', async () => {
+test('version read combines own manifest, the latest release, and the owning profile', async () => {
   const root = await mkdtemp(join(tmpdir(), 'geek2api-version-npm-'))
   const ownPackageJsonUrl = await npmInstall(root)
   let requests = 0
@@ -108,11 +150,13 @@ test('version read combines own manifest, registry latest, and the owning npm pr
   assert.deepEqual(first, {
     current: '1.0.3',
     latest: '1.0.4',
+    releaseUrl: releasePage('1.0.4'),
     updateAvailable: true,
+    updatable: true,
     install: { kind: 'npm', profile: 'web' },
     fetchedAt: 1000,
   })
-  assert.deepEqual(observed, { url: NPM_REGISTRY_LATEST_URL, redirect: 'error' })
+  assert.deepEqual(observed, { url: GITHUB_LATEST_RELEASE_URL, redirect: 'error' })
   await manager.read()
   assert.equal(requests, 1, 'fresh cached reads stay off the network')
   await manager.read({ force: true })
@@ -131,7 +175,7 @@ test('registry failures and malformed payloads surface one sanitized error', asy
   const malformed = createGeek2APIPluginManager({
     env: { DSH_HOME: root },
     ownPackageJsonUrl,
-    fetchImpl: async () => ({ ok: true, status: 200, async json() { return { version: 'not-a-version' } } }),
+    fetchImpl: async () => ({ ok: true, status: 200, async json() { return { tag_name: 'not-a-version' } } }),
   })
   await assert.rejects(() => malformed.read(), /^Error: Geek2API plugin version check failed$/u)
 })
@@ -184,14 +228,14 @@ async function desktopRuntime(root) {
 const installRecorder = async ({ args, cwd }) => {
   await writeManifest(join(cwd, 'node_modules', PACKAGE_NAME, 'package.json'), {
     name: PACKAGE_NAME,
-    version: args.at(-1).split('@').at(-1),
+    version: /-(\d+\.\d+\.\d+)\.tgz$/u.exec(args.at(-1))[1],
   })
   return { code: 0, stdout: '', stderr: '' }
 }
 
-test('update installs the exact version into the owning profile, pinned and age-free', async () => {
+test('update installs the release tarball into the owning profile, age-free', async () => {
   const root = await mkdtemp(join(tmpdir(), 'geek2api-version-update-'))
-  const ownPackageJsonUrl = await npmInstall(root)
+  const ownPackageJsonUrl = await releaseInstall(root)
   const calls = []
   let registryRequests = 0
   const manager = createGeek2APIPluginManager({
@@ -212,7 +256,7 @@ test('update installs the exact version into the owning profile, pinned and age-
   assert.deepEqual(updated, { version: '1.0.4', profile: 'web' })
   assert.equal(calls[0].command, 'pnpm')
   assert.deepEqual(calls[0].args, [
-    'add', '--save-exact', '--config.minimumReleaseAge=0', `${PACKAGE_NAME}@1.0.4`,
+    'add', '--config.minimumReleaseAge=0', `${PACKAGE_NAME}@${tarballUrl('1.0.4')}`,
   ])
   assert.equal(calls[0].cwd, join(root, 'profiles', 'web'))
   await manager.read()
@@ -240,7 +284,7 @@ test('desktop hosts install with the bundled pnpm, never by launching the deskto
   const [call] = calls
   assert.equal(call.command, '/Applications/DeepSeek Harness')
   assert.deepEqual(call.args, [
-    runtime.pnpm, 'add', '--save-exact', '--config.minimumReleaseAge=0', `${PACKAGE_NAME}@1.0.4`,
+    runtime.pnpm, 'add', '--config.minimumReleaseAge=0', `${PACKAGE_NAME}@${tarballUrl('1.0.4')}`,
   ])
   const flattened = JSON.stringify(call)
   assert.equal(flattened.includes(runtime.hostEntry), false)
@@ -358,4 +402,21 @@ test('loopback RPC exposes version and update endpoints with sanitized errors', 
     ok: false,
     error: { code: 'geek2api/request-failed', message: 'Geek2API plugin version is unavailable', details: {} },
   })
+})
+
+test('a release without its tarball is reported but not installed', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'geek2api-version-noasset-'))
+  const ownPackageJsonUrl = await releaseInstall(root, '1.0.3')
+  const manager = createGeek2APIPluginManager({
+    env: { DSH_HOME: root },
+    ownPackageJsonUrl,
+    fetchImpl: async () => ({ ok: true, status: 200, async json() { return { ...releaseBody('1.0.4'), assets: [] } } }),
+    runCommand: async () => {
+      throw new Error('runCommand must not run without a tarball')
+    },
+  })
+  const info = await manager.read()
+  assert.equal(info.updateAvailable, true)
+  assert.equal(info.updatable, false)
+  await assert.rejects(() => manager.update(), /^Error: Geek2API plugin release has no package to install$/u)
 })

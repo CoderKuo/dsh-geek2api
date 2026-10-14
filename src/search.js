@@ -233,7 +233,7 @@ export function buildSearchRequest(backend, { apiHost, query, sessionId }) {
       headers: key => ({ authorization: `Bearer ${key}` }),
       body: {
         model,
-        // The Codex group refuses a bare string input on some channels.
+        // Message-shaped input is accepted by every Responses upstream.
         input: [{
           role: 'user',
           content: [{
@@ -401,7 +401,7 @@ export function createGeek2APISearchProvider({
         if (classifyClientPolicy(failure)) {
           throw new WebError(explainClientPolicyFailure(), 'WEB_PROVIDER_ERROR')
         }
-        const kind = classifyGatewayFailure(failure) ?? (outcome.status === 401 ? 'invalid-key' : undefined)
+        const kind = classifyGatewayFailure(failure)
         if (kind !== undefined) {
           // The same sink the model route uses: the key moves aside for both.
           onKeyFailure?.(kind, failure, key.key, key.id)

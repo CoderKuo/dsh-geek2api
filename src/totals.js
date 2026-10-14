@@ -1,11 +1,14 @@
 /**
  * Totals across the keys a balance read returned.
  *
- * Keys of one Geek2API account spend the same wallet, so a wallet is counted
- * once however many of its keys are stored. Two wallet rows are the same
- * wallet when the gateway names the same account (`accountRef`) or, when it
- * names none, when they report the same balance to the micro-dollar. Key
- * quotas and subscriptions are the key's own and add up.
+ * In sub2api money belongs to the account, not the key:
+ * - every wallet key of one account spends the same wallet, counted once —
+ *   the same wallet when the gateway names the same account (`accountRef`)
+ *   or, when it names none, when the balances agree to the micro-dollar;
+ * - a subscription belongs to the user and its group, so keys on the same
+ *   plan count it once;
+ * - a key quota is a cap on top of the wallet, not money of its own, so it
+ *   is left out of the sums and reported as `capped`.
  *
  * @module dsh-geek2api/totals
  */
@@ -14,6 +17,7 @@ const amount = value => (typeof value === 'number' && Number.isFinite(value) ? v
 
 /** Which pool of money a row draws on; rows with the same pool count once. */
 function poolOf(row, usage) {
+  if (usage.mode === 'subscription') return `subscription:${usage.planName ?? row?.id}`
   if (usage.mode !== 'wallet') return `key:${row?.id}`
   if (typeof usage.accountRef === 'string') return `account:${usage.accountRef}`
   const remaining = amount(usage.availableUsd)
@@ -24,11 +28,11 @@ function poolOf(row, usage) {
  * Add up the balance rows the host returned.
  * @param rows - the `keys` array of a balance projection.
  * @returns summed amounts plus the conditions that make a sum incomplete:
- *   keys whose read failed, keys with no limit at all, and how many wallet
- *   rows were folded into a wallet already counted.
+ *   keys whose read failed, keys with no limit at all, rows folded into a
+ *   pool already counted, and key caps left out of the sum.
  */
 export function sumBalances(rows) {
-  const total = { keys: 0, counted: 0, unread: 0, unlimited: 0, shared: 0, remainingUsd: 0, usedUsd: 0, limitUsd: 0 }
+  const total = { keys: 0, counted: 0, unread: 0, unlimited: 0, shared: 0, capped: 0, remainingUsd: 0, usedUsd: 0, limitUsd: 0 }
   const seen = new Set()
   for (const row of Array.isArray(rows) ? rows : []) {
     total.keys += 1
@@ -38,6 +42,10 @@ export function sumBalances(rows) {
       continue
     }
     total.counted += 1
+    if (usage.mode === 'quota') {
+      total.capped += 1
+      continue
+    }
     const pool = poolOf(row, usage)
     if (seen.has(pool)) {
       total.shared += 1

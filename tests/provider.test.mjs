@@ -35,7 +35,7 @@ test('a terminal quota event moves the ring and is rewritten for the classifier'
   const failures = []
   const event = {
     type: 'error',
-    error: { errorMessage: '403 {"error":{"message":"当前令牌额度已用完"}}' },
+    error: { errorMessage: '429 {"error":{"code":"API_KEY_QUOTA_EXHAUSTED","message":"API key 额度已用完"}}' },
   }
   const guarded = guardKeyRotation(fakeStream([event]), {
     key: 'sk-aaaaaaaaaaaaaaaa',
@@ -55,7 +55,7 @@ test('a terminal quota event moves the ring and is rewritten for the classifier'
 test('a rejected key reported as a terminal event normalizes to auth', async () => {
   const failures = []
   const guarded = guardKeyRotation(fakeStream([
-    { type: 'done', message: { errorMessage: '401 {"error":{"message":"无效的令牌"}}' } },
+    { type: 'done', message: { errorMessage: '401 {"error":{"code":"INVALID_API_KEY","message":"Invalid API key"}}' } },
   ]), { key: 'sk-bbbbbbbbbbbbbbbbbb', onKeyFailure: (...args) => failures.push(args) })
   const received = []
   for await (const item of guarded) received.push(item)
@@ -216,7 +216,8 @@ test('sub2api key faults move the ring: invalid, disabled, deleted group, and em
     ['401 {"error":{"message":"Invalid API key"}}', 'invalid-key'],
     ['401 {"error":{"message":"API key is disabled"}}', 'invalid-key'],
     ['403 {"error":{"message":"API Key 所属分组已删除"}}', 'invalid-key'],
-    ['403 {"error":{"message":"余额不足，请充值"}}', 'quota'],
+    ['403 {"error":{"message":"余额不足，请充值"}}', 'exhausted'],
+    ['429 {"error":{"message":"API key 额度已用完"}}', 'quota'],
   ]
   for (const [message, kind] of cases) {
     const failures = []

@@ -12,17 +12,33 @@
  * @module dsh-geek2api/key-chooser
  */
 
+import { EXHAUSTED_FAILURE } from './failures.js'
 import { pickKeyForModel } from './groups.js'
 
 /** How long a request with a choice of keys waits for the first group reading. */
 export const DEFAULT_GROUP_WAIT_MS = 6_000
+/**
+ * How long a key whose money ran out (wallet, subscription, or window) is
+ * skipped. It is never disabled for that: a top-up or a new window brings it
+ * back, and a balance read showing money brings it back at once.
+ */
+export const EXHAUSTED_SKIP_MS = 10 * 60_000
 
 /**
  * @param options - the key ring, the group reader, what to do after a key
  *   moved aside, a logger, and how long to wait for the first group reading.
  * @returns the chooser.
  */
-export function createKeyChooser({ ring, groups, onRotated, logger, waitMs = DEFAULT_GROUP_WAIT_MS }) {
+export function createKeyChooser({ ring, groups, onRotated, logger, waitMs = DEFAULT_GROUP_WAIT_MS, skipMs = EXHAUSTED_SKIP_MS, now = Date.now }) {
+  /** key id → epoch ms until which the key is skipped (in memory only). */
+  const skipped = new Map()
+  const isSkipped = id => {
+    const until = skipped.get(id)
+    if (until === undefined) return false
+    if (until > now()) return true
+    skipped.delete(id)
+    return false
+  }
   /**
    * Key material to ring id. A failure is reported from inside a stream, which
    * carries the request's key but not its id; this index is refreshed on every
@@ -37,7 +53,7 @@ export function createKeyChooser({ ring, groups, onRotated, logger, waitMs = DEF
     snapshot = entries
     for (const entry of entries) idByKey.set(entry.key, entry.id)
   }
-  const usable = () => snapshot.filter(entry => entry.disabled !== true)
+  const usable = () => snapshot.filter(entry => entry.disabled !== true && !isSkipped(entry.id))
   const covers = (keyId, modelId) => groups.covers(keyId, modelId)
 
   /**
@@ -54,10 +70,20 @@ export function createKeyChooser({ ring, groups, onRotated, logger, waitMs = DEF
     clearTimeout(timer)
   }
 
-  /** The active key, after refreshing the ring and, when it matters, the groups. */
+  /**
+   * The active key, after refreshing the ring and, when it matters, the
+   * groups. A skipped active key hands over to the next usable one in ring
+   * order; with none left, the active key is returned so the failure speaks.
+   */
   const active = async () => {
     await remember()
-    const key = await ring.activeKey()
+    let key = await ring.activeKey()
+    if (key !== undefined && isSkipped(key.id)) {
+      const start = snapshot.findIndex(entry => entry.id === key.id)
+      const order = start < 0 ? snapshot : [...snapshot.slice(start + 1), ...snapshot.slice(0, start)]
+      const next = order.find(entry => entry.disabled !== true && !isSkipped(entry.id))
+      if (next !== undefined) key = { ...key, id: next.id, label: next.label, key: next.key }
+    }
     if (key !== undefined) await warm()
     return key
   }
@@ -66,6 +92,23 @@ export function createKeyChooser({ ring, groups, onRotated, logger, waitMs = DEF
     remember,
     covers,
     active,
+
+    /** Key ids skipped for running out of money, with when the skip ends. */
+    skipped() {
+      return Object.fromEntries([...skipped.keys()].filter(isSkipped).map(id => [id, skipped.get(id)]))
+    },
+
+    /**
+     * A balance read is fresher evidence than a failure: a skipped key that
+     * now shows money is usable again.
+     * @param rows - the `keys` of a balance projection.
+     */
+    noteBalances(rows) {
+      for (const row of Array.isArray(rows) ? rows : []) {
+        const available = row?.usage?.availableUsd
+        if (row?.stale === undefined && typeof available === 'number' && available > 0) skipped.delete(row.id)
+      }
+    },
 
     /**
      * The key one HTTP request for `modelId` runs with, given the active key
@@ -133,6 +176,12 @@ export function createKeyChooser({ ring, groups, onRotated, logger, waitMs = DEF
       const id = knownId ?? (key === undefined ? undefined : idByKey.get(key))
       if (id === undefined) {
         logger?.warn?.('geek2api: %s reported for an unidentified key; not rotating', kind)
+        return
+      }
+      if (kind === EXHAUSTED_FAILURE) {
+        skipped.set(id, now() + skipMs)
+        logger?.warn?.('geek2api: key %s has no money left for now; skipping it for a while', id)
+        onRotated?.()
         return
       }
       logger?.warn?.('geek2api: %s on key %s; the next key serves the retry', kind, id)

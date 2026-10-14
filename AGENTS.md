@@ -4,8 +4,8 @@ This file governs the entire `dsh-geek2api` repository.
 
 ## Repository identity
 
-- Canonical repository: not published yet (derived from `https://github.com/BaronCyrus/dsh-packycode-api`, MIT)
-- npm package: `dsh-geek2api`
+- Canonical repository: `https://github.com/CoderKuo/dsh-geek2api` (derived from `https://github.com/BaronCyrus/dsh-packycode-api`, MIT)
+- Package name: `dsh-geek2api`, distributed as a GitHub Release tarball (`dsh-geek2api-<version>.tgz`); not published to npm
 - DSH plugin row: `geek2api`
 - Model group display name: `Geek2API`
 - Gateway: Geek2API, a sub2api deployment. Entry points: `hk`, `hk2`, `hk3`, `hk4`, `www` `.geek2api.com`. Default endpoints are geek2api.com hosts only.
@@ -47,52 +47,30 @@ Live gateway behavior is verified with `node scripts/live-check.mjs` after a bui
 
 ## Release authorization
 
-`npm publish`, Git tags, GitHub Releases, and version publication are externally visible and partially irreversible. Execute them only when the user explicitly asks to publish or release and confirms the target version. A request to modify, test, or commit alone is not release authorization.
+Git tags and GitHub Releases are externally visible: installed copies offer the newest release as an update. Create them only when the user explicitly asks to release and confirms the target version. A request to modify, test, or commit alone is not release authorization.
 
-Never reuse, move, delete, or overwrite a published npm version or Git tag. If a published version needs a correction, create a new patch version.
+Never reuse, move, or delete a published tag or release asset. If a released version needs a correction, release a new patch version.
 
 ## Release checklist
 
-1. Synchronize and confirm a clean base:
+1. Confirm a clean base and an unused version:
 
    ```sh
-   git fetch origin --tags --prune
    git status --short --branch
-   git log --oneline HEAD..origin/main
+   git ls-remote --exit-code --tags origin refs/tags/v<version>   # must fail
    ```
 
-   Fast-forward clean remote changes before editing. Never discard remote changes.
+2. Update `package.json` version and add a `## <version>` section to `CHANGELOG.md` (the release workflow uses that section as the release notes).
 
-2. Confirm the requested SemVer is unused:
+3. Validate: `pnpm install --frozen-lockfile && pnpm run check`, and commit the rebuilt `lib/`.
 
-   ```sh
-   npm view dsh-geek2api@<version> version --json
-   git ls-remote --exit-code --tags origin refs/tags/v<version>
-   ```
-
-   For an unused npm version, `npm view` normally returns `E404`. An existing npm version or Git tag requires choosing a new version.
-
-3. Update all release metadata together: `package.json` version, `CHANGELOG.md`, and any version pinned in `README.md` / `README.en.md`.
-
-4. Validate and inspect the exact release artifact:
-
-   ```sh
-   pnpm install --frozen-lockfile
-   pnpm run check
-   npm publish .artifacts/dsh-geek2api-<version>.tgz --access public --dry-run --json
-   ```
-
-5. Commit the release and push `main` without force. [`.github/workflows/publish.yml`](.github/workflows/publish.yml) must already be on the commit that will be tagged. Do not push the tag in this step.
-
-6. Confirm the package has a GitHub Actions trusted publisher before pushing the tag: repository `<owner>/dsh-geek2api`, workflow filename `publish.yml`, environment empty. Never request that a token, password, or one-time code be pasted into chat.
-
-7. Create the annotated tag and push it. That push publishes with GitHub OIDC. Do not run `npm publish` locally for a release. A local publish cannot attach provenance. Do not set `NODE_AUTH_TOKEN` or a setup-node `registry-url` in the publish workflow; npm treats either as token auth and skips OIDC.
+4. Push `main`, then tag and push the tag:
 
    ```sh
    git tag -a v<version> -m "dsh-geek2api v<version>"
    git push origin v<version>
    ```
 
-   `workflow_dispatch` on the same workflow only prints the OIDC identity npm will match. It does not publish.
+   [`.github/workflows/release.yml`](.github/workflows/release.yml) refuses a tag that does not match `package.json`, runs `pnpm run check`, refuses a stale `lib/`, and creates the release with `dsh-geek2api-<version>.tgz` attached. The plugin's update check reads `releases/latest` and installs that asset.
 
-8. Confirm the publish workflow succeeded for that tag before declaring the release public. On an OIDC `package not found` error, fix the trusted publisher and re-run the same workflow. Do not move the tag. If the tagged tree itself must change, publish a new patch version.
+5. Confirm the workflow succeeded and the asset is attached before announcing the release.

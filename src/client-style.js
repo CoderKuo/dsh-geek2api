@@ -35,6 +35,8 @@ export const STYLE = `
 .pkc-input:focus{border-color:var(--dsw-alias-state-business-primary)}
 .pkc-input::placeholder{color:var(--dsw-alias-label-caption)}
 .pkc-input:disabled{opacity:.5}
+.pkc-link{color:var(--dsw-alias-state-business-primary);font-size:12px;text-decoration:none}
+.pkc-link:hover{text-decoration:underline}
 .pkc-textarea{display:block;width:100%;height:auto;min-height:96px;padding:8px 10px;line-height:1.6;resize:vertical;white-space:pre;overflow-x:auto}
 .pkc-form{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
 

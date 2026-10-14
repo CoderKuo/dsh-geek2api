@@ -23,7 +23,13 @@ import {
 } from './constants.js'
 import { ambientFetch, boundedFetch, TransportError } from './request.js'
 
-/** Accept an absolute http(s) origin and drop a trailing slash. */
+const LOOPBACK = new Set(['localhost', '127.0.0.1', '[::1]'])
+
+/**
+ * Accept an https origin, keeping only the origin: a pasted `/v1` (the base
+ * URL OpenAI clients use) would otherwise double every path. Plain http is
+ * refused outside loopback, because the key travels in a header.
+ */
 export function normalizeHost(value, fallback) {
   const text = typeof value === 'string' ? value.trim() : ''
   if (text === '') return fallback
@@ -33,8 +39,9 @@ export function normalizeHost(value, fallback) {
   } catch {
     return fallback
   }
-  if (url.protocol !== 'https:' && url.protocol !== 'http:') return fallback
-  return `${url.origin}${url.pathname.replace(/\/+$/u, '')}`
+  if (url.protocol === 'https:') return url.origin
+  if (url.protocol === 'http:' && LOOPBACK.has(url.hostname)) return url.origin
+  return fallback
 }
 
 /**
@@ -49,10 +56,16 @@ export function normalizeHostList(value) {
   return hosts.length === 0 ? [...DEFAULT_API_HOSTS] : hosts
 }
 
-/** Whether a failure means the host never answered. */
+/**
+ * Whether a failure means the host never answered. A timeout is not: the
+ * host accepted the connection and the gateway behind it is slow, which every
+ * host would be. Text that carries an HTTP status is the gateway's answer,
+ * whatever words it uses.
+ */
 export function isTransportFailure(error) {
-  if (error instanceof TransportError) return error.aborted !== true
+  if (error instanceof TransportError) return error.aborted !== true && error.timedOut !== true
   const text = error instanceof Error ? error.message : typeof error === 'string' ? error : ''
+  if (/^\s*\d{3}\b|\(\d{3}\)|status code \d{3}|HTTP \d{3}/u.test(text)) return false
   return /fetch failed|ECONNRESET|ECONNREFUSED|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|UND_ERR_|socket hang up|network error|other side closed|certificate|TLS|connect timeout|Connection error|ConnectTimeout|getaddrinfo/iu.test(text)
 }
 
@@ -186,6 +199,7 @@ export function createHostPool({
     return configured().map(host => ({
       host,
       current: host === best,
+      probed: probedAt !== 0,
       ...(latency.has(host) ? { latencyMs: latency.get(host) } : {}),
       ...(isCooling(host) ? { coolingUntil: cooling.get(host) } : {}),
     }))

@@ -1,5 +1,5 @@
 /**
- * Failure classification for the two conditions that move the key ring along.
+ * Failure classification for the conditions that move the key ring along.
  *
  * The gateway reports an exhausted key and a rejected key in Chinese, and the
  * harness classifies failures by fixed English/status wording it recognizes
@@ -12,26 +12,43 @@
  * @module dsh-geek2api/failures
  */
 
-/** Terminal quota, balance, or credit wording, in the gateway's own languages. */
-const QUOTA_WORDING = /额度|余额|配额|欠费|insufficient[\s_-]+(?:quota|balance|credits?)|quota[\s_-]+(?:exceeded|exhausted|reached)|out[\s_-]+of[\s_-]+(?:credits?|budget)|no active subscription|INSUFFICIENT_BALANCE/iu
-/** A rejected key names itself; a bare 403 does not, and must not disable one. */
-const INVALID_KEY_WORDING = /无效的令牌|令牌无效|无效密钥|密钥无效|invalid[\s_-]+api[\s_-]*key|invalid_authentication|api key is invalid|api key is disabled|api key\s*已过期|API_KEY_(?:DISABLED|EXPIRED)|user account is not active|所属分组已删除|所属专属分组不再允许|GROUP_NOT_ALLOWED/iu
-const INVALID_KEY_STATUS = /\b401\b/
+/**
+ * The key itself is gone for good: sub2api's own refusals of the credential
+ * (`INVALID_API_KEY`, `API_KEY_DISABLED`, an expired key, an inactive user, a
+ * deleted or withdrawn group). Only the gateway's own wording counts; a bare
+ * 401 may be an upstream account's error passed through, and must not retire
+ * the user's key.
+ */
+const INVALID_KEY_WORDING = /invalid api key|INVALID_API_KEY|api key is disabled|API_KEY_DISABLED|api key\s*已过期|API_KEY_EXPIRED|user account is not active|USER_INACTIVE|user associated with api key not found|所属分组已删除|所属专属分组不再允许|GROUP_NOT_ALLOWED/iu
 
 /**
- * A gateway group that only serves its vendor's official client. These arrive
- * as 403, which the harness reads as an authentication failure and renders as
+ * The key's own spending cap is used up (`API key 额度已用完`). It stays used up
+ * until someone raises the cap, so the key is moved aside until re-enabled.
+ */
+const KEY_QUOTA_WORDING = /api key\s*额度已用完|api key quota exhausted|API_KEY_QUOTA_EXHAUSTED/iu
+
+/**
+ * Money that comes back on its own or with a top-up: the account wallet
+ * (shared by every key of the account), a subscription window, a key's
+ * 5h/1d/7d window, or a per-platform daily quota. The key is skipped for a
+ * while, never retired: recharging must not leave keys disabled by hand.
+ */
+const EXHAUSTED_WORDING = /余额不足，?请充值|INSUFFICIENT_BALANCE|no active subscription|SUBSCRIPTION_NOT_FOUND|(?:daily|weekly|monthly) usage limit exceeded|限额已用完|usage quota exhausted for this platform/iu
+
+/**
+ * A group that only serves its vendor's official client. These arrive as
+ * 403, which the harness reads as an authentication failure and renders as
  * an invalid-API-key problem — the opposite of what happened, and a condition
  * no retry can clear.
  */
-const CLIENT_POLICY_WORDING = /only accessible via the official|only accepts requests from the official|official\s+claude(?:\s+code)?\s+cli|官方\s*claude(?:\s*code)?\s*cli|请使用标准\s*codex\s*客户端|客户端存在异常|二次分发|API\s*转接/iu
+const CLIENT_POLICY_WORDING = /only accessible via the official|only accepts requests from the official|official\s+claude(?:\s+code)?\s+cli|官方\s*claude(?:\s*code)?\s*cli/iu
 
 /**
- * The gateway's answer when a key's groups do not include the model's
- * supplier: `model_not_found` / 当前令牌未覆盖供应商. The key is fine for other
- * models, so it is never moved aside for this.
+ * The gateway's answer when the key's group does not serve the model. The key
+ * is fine for other models, so it is never moved aside for this. (`No
+ * available accounts` is not here: sub2api says that when a pool is busy.)
  */
-const COVERAGE_WORDING = /model_not_found|未覆盖供应商|无可用渠道|no available channel|model is not allowed|model is not supported|is not supported by any configured account|no available accounts|is not available\. use get \/v1\/models/iu
+const COVERAGE_WORDING = /model is not allowed|model is not supported|is not supported by any configured account|is not available\. use get \/v1\/models/iu
 
 /**
  * Whether the gateway refused the model for this key's groups.
@@ -42,8 +59,10 @@ export function classifyCoverage(message) {
   return COVERAGE_WORDING.test(typeof message === 'string' ? message : '')
 }
 
-/** The key's quota is exhausted; move to the next key. */
+/** The key's own cap is used up; move to the next key until re-enabled. */
 export const QUOTA_FAILURE = 'quota'
+/** Wallet, subscription, or window exhausted; skip the key for a while. */
+export const EXHAUSTED_FAILURE = 'exhausted'
 /** The gateway rejected the key itself; move to the next key. */
 export const INVALID_KEY_FAILURE = 'invalid-key'
 /** The gateway refuses this client for the route; the key is not at fault. */
@@ -59,11 +78,7 @@ export function classifyClientPolicy(message) {
 }
 
 /**
- * Classify a gateway failure message.
- *
- * Quota wording wins over a status token: an exhausted balance is often
- * reported as 402/403, and only the key's own rejection may read as 401. A
- * client-policy refusal is not a key fault and is classified separately.
+ * Classify a gateway failure message by sub2api's own wording.
  * @param message - provider failure text, as pi-ai carries it.
  * @returns the failure kind, or undefined when the key is not at fault.
  */
@@ -71,9 +86,9 @@ export function classifyGatewayFailure(message) {
   const text = typeof message === 'string' ? message : ''
   if (text === '') return undefined
   if (classifyClientPolicy(text)) return undefined
-  if (QUOTA_WORDING.test(text)) return QUOTA_FAILURE
   if (INVALID_KEY_WORDING.test(text)) return INVALID_KEY_FAILURE
-  if (INVALID_KEY_STATUS.test(text)) return INVALID_KEY_FAILURE
+  if (KEY_QUOTA_WORDING.test(text)) return QUOTA_FAILURE
+  if (EXHAUSTED_WORDING.test(text)) return EXHAUSTED_FAILURE
   return undefined
 }
 
@@ -120,7 +135,7 @@ export function explainClientPolicyFailure() {
  * per-account wait queue is full, or it throttled or shed the request. The
  * CLI retries these on its own; this matches what is left when it gave up.
  */
-const CAPACITY_WORDING = /concurrency_queue_full|并发排队已满|wait queues? (?:are|is) full|负载已饱和|overloaded|rate[_\s-]?limit|API Error:\s*(?:429|502|503|504|529)\b/iu
+const CAPACITY_WORDING = /no available accounts|concurrency limit exceeded|concurrency_queue_full|并发排队已满|wait queues? (?:are|is) full|负载已饱和|overloaded|rate[_\s-]?limit|API Error:\s*(?:429|502|503|504|529)\b/iu
 
 /**
  * Whether a CLI failure is the gateway being busy rather than a fault of the
@@ -208,7 +223,7 @@ export function explainCliGroupFailure(key, message) {
 export function normalizeFailureMessage(message, kind, options = {}) {
   const text = typeof message === 'string' && message.length > 0 ? message : 'Geek2API request failed'
   if (kind === CLIENT_POLICY_FAILURE) return explainClientPolicyFailure(options.keyName)
-  if (kind === QUOTA_FAILURE) {
+  if (kind === QUOTA_FAILURE || kind === EXHAUSTED_FAILURE) {
     return `${neutralizeAuthStatus(text)} — Geek2API: insufficient quota for this API key; trying the next key`
   }
   if (kind === INVALID_KEY_FAILURE) {

@@ -1,8 +1,8 @@
 /**
  * Bridge to the local Claude Code CLI.
  *
- * The gateway's `cc` group serves its Claude models only to the official CLI,
- * so this module runs that CLI — the real binary, not an imitation of it — as
+ * On the `cli` Claude runtime (and for the `claude_code` tool) this module runs
+ * the official CLI — the real binary, not an imitation of it — as
  * a subprocess and hands its final answer back to the harness. The child gets
  * the plugin's own endpoint and key through the environment, plus an isolated
  * `CLAUDE_CONFIG_DIR`: `~/.claude/settings.json` env wins over an inherited

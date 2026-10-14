@@ -111,8 +111,8 @@ export function createGeek2APIProfile(provider) {
 export function createRouteAdapter({ ring, keys, hosts, fallbackSessionId, resolveAttachments, isModelVisible = () => true }) {
   const raw = createGeek2APIProvider()
   /**
-   * The gateway's Codex-group check refuses a Responses request that carries
-   * no `prompt_cache_key` with a 403, which pi-ai derives from the session id.
+   * GPT on Responses carries a `prompt_cache_key`, which pi-ai derives from
+   * the session id; it keeps one conversation on the same upstream cache.
    * The harness supplies one for every agent turn; the fallback covers a
    * caller that does not, so the route never fails for a missing cache key.
    */

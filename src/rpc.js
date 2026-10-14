@@ -30,7 +30,7 @@ const keyId = payload => String(payload?.id ?? '')
  *   web search controller (without one, its endpoints refuse).
  * @returns a handler for `connection.rpc.handle(CHANNEL, handler)`.
  */
-export function createGeek2APIRpc({ ring, balance, groups, hosts, preference, claudeRuntime, claudeCli, pluginManager, search, modelSelection }) {
+export function createGeek2APIRpc({ ring, balance, groups, hosts, keys, preference, claudeRuntime, claudeCli, pluginManager, search, modelSelection }) {
   const need = (service, message) => {
     if (service === undefined) throw new Error(message)
     return service
@@ -47,6 +47,7 @@ export function createGeek2APIRpc({ ring, balance, groups, hosts, preference, cl
     writable: preference.writable === true,
     defaults: { apiHosts: [...DEFAULT_API_HOSTS] },
     claudeRuntime: typeof claudeRuntime === 'function' ? claudeRuntime() : 'http',
+    skipped: typeof keys?.skipped === 'function' ? keys.skipped() : {},
   })
   const writable = () => {
     if (preference.writable !== true) throw new Error('Geek2API settings are not writable in this profile')

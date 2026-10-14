@@ -27,7 +27,7 @@ Installing it adds a `Geek2API` group to the model picker. No YAML and no provid
 
 ## Install
 
-1. In the desktop app, open **Plugins → Add plugin**, enter `dsh-geek2api`, choose the official registry, and install. No restart is needed for a first install.
+1. In the desktop app, open **Plugins → Add plugin**, enter `https://github.com/CoderKuo/dsh-geek2api/releases/latest/download/dsh-geek2api.tgz`, and install. No restart is needed for a first install. You can also download the `.tgz` from [Releases](https://github.com/CoderKuo/dsh-geek2api/releases) and install it from a local path.
 2. Open **Settings → Geek2API** and paste an API key (create one under API Keys in the Geek2API console). Add more keys for other groups; the plugin picks the right one per model.
 3. Pick a model under the `Geek2API` group.
 
@@ -56,7 +56,7 @@ Whether a key can use a model depends on its group; trust the ✓ / ✕ in setti
 
 ## Update and uninstall
 
-Update from **Settings → Geek2API → Update plugin**, then fully quit and reopen the desktop app. Before uninstalling, set web search back to "leave DSH alone" if you used it, then uninstall from the Plugins page and restart.
+The version card in **Settings → Geek2API** checks the latest GitHub release; update from there, then fully quit and reopen the desktop app. Before uninstalling, set web search back to "leave DSH alone" if you used it, then uninstall from the Plugins page and restart.
 
 ## Security
 

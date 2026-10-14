@@ -3,18 +3,30 @@ import test from 'node:test'
 
 import { sumBalances } from '../src/totals.js'
 
-test('adds the per-key quotas a balance read returned', () => {
+test('a key quota is a cap on the wallet, not money: it stays out of the sums', () => {
   const rows = [
     { id: 'a', usage: { mode: 'quota', availableUsd: 499.07, usedUsd: 0.93, limitUsd: 500 } },
     { id: 'b', usage: { mode: 'subscription', planName: 'Plus', availableUsd: 500, usedUsd: 0, limitUsd: 500, resetPeriod: 'monthly' } },
   ]
   const totals = sumBalances(rows)
   assert.equal(totals.counted, 2)
-  assert.equal(Math.round(totals.remainingUsd * 100) / 100, 999.07)
-  assert.equal(Math.round(totals.usedUsd * 100) / 100, 0.93)
-  assert.equal(totals.limitUsd, 1000)
+  assert.equal(totals.capped, 1)
+  assert.equal(totals.remainingUsd, 500)
+  assert.equal(totals.usedUsd, 0)
+  assert.equal(totals.limitUsd, 500)
   assert.equal(totals.unread, 0)
   assert.equal(totals.unlimited, 0)
+})
+
+test('keys on the same subscription plan count it once', () => {
+  const totals = sumBalances([
+    { id: 'a', usage: { mode: 'subscription', planName: 'Plus', availableUsd: 30, usedUsd: 20, limitUsd: 50 } },
+    { id: 'b', usage: { mode: 'subscription', planName: 'Plus', availableUsd: 30, usedUsd: 20, limitUsd: 50 } },
+    { id: 'c', usage: { mode: 'subscription', planName: 'Max', availableUsd: 100, usedUsd: 0, limitUsd: 100 } },
+  ])
+  assert.equal(totals.shared, 1)
+  assert.equal(totals.remainingUsd, 130)
+  assert.equal(totals.limitUsd, 150)
 })
 
 test('counts only what it can read and reports the rest', () => {
@@ -46,7 +58,7 @@ test('a key without a period limit contributes only what it reports', () => {
 })
 
 test('an empty or malformed row list totals to zero', () => {
-  assert.deepEqual(sumBalances([]), { keys: 0, counted: 0, unread: 0, unlimited: 0, shared: 0, remainingUsd: 0, usedUsd: 0, limitUsd: 0 })
+  assert.deepEqual(sumBalances([]), { keys: 0, counted: 0, unread: 0, unlimited: 0, shared: 0, capped: 0, remainingUsd: 0, usedUsd: 0, limitUsd: 0 })
   assert.equal(sumBalances(undefined).keys, 0)
   assert.equal(sumBalances([null, 7]).keys, 2)
   assert.equal(sumBalances([null, 7]).counted, 0)
@@ -72,6 +84,7 @@ test('without an account reference, wallets with the same balance are the same w
     { id: 'd', usage: { mode: 'quota', availableUsd: 4226.232196, limitUsd: 5000 } },
   ])
   assert.equal(totals.shared, 1)
-  assert.equal(Math.round((totals.remainingUsd) * 1e6) / 1e6, Math.round((4226.232196 * 2 + 12.5) * 1e6) / 1e6, 'a key quota is its own money')
-  assert.equal(totals.limitUsd, 5000)
+  assert.equal(Math.round((totals.remainingUsd) * 1e6) / 1e6, Math.round((4226.232196 + 12.5) * 1e6) / 1e6, 'one wallet, counted once; the key cap is not money')
+  assert.equal(totals.capped, 1)
+  assert.equal(totals.limitUsd, 0)
 })

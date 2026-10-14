@@ -88,7 +88,7 @@ export const Config = z.object({
    * request DSH's own search would have served.
    */
   searchProvider: live(z.union([...SEARCH_MODES]).default(SEARCH_MODE_DEFAULT)),
-  /** Which Geek2API model runs a search: `deepseek` or `gpt`. */
+  /** Which Geek2API model runs a search: `claude` or `gpt`. */
   searchBackend: live(z.union([...SEARCH_BACKENDS]).default(DEFAULT_SEARCH_BACKEND)),
   /** Only the picker is filtered; an existing session can keep its model. */
   hiddenModels: live(z.array(z.string()).default([])),
@@ -112,7 +112,8 @@ export function apply(ctx, config) {
   /** Whether the Claude models run through the local CLI this turn. */
   const claudeRuntime = () => (fieldValue((source() ?? {}).claudeRuntime) === 'cli' ? 'cli' : 'http')
 
-  const balance = createBalanceReader({ listKeys: () => ring.secrets(), hosts })
+  // A read showing money brings back a key skipped for running out of it.
+  const balance = createBalanceReader({ listKeys: () => ring.secrets(), hosts, onRead: rows => keys.noteBalances(rows) })
   /**
    * Which token groups each key is in, and so which models it can reach.
    * Nothing reads it at boot: the settings panel asks for it, and a request
@@ -151,8 +152,8 @@ export function apply(ctx, config) {
   // ── the model route ───────────────────────────────────────────────────────
 
   /**
-   * The Claude Code CLI runner. Geek2API serves its Claude models only to the
-   * official CLI, so CLI-backed models are run by that CLI itself — with this
+   * The Claude Code CLI runner, for the `cli` Claude runtime and the
+   * `claude_code` tool: the official CLI itself runs the turn — with this
    * plugin's endpoint and a ring key, in an isolated config home. Each run
    * uses the active key unless its groups cannot reach the run's Claude model
    * and another stored key's can, and reports which key it used by label.
@@ -301,6 +302,8 @@ export function apply(ctx, config) {
   ctx.on?.('loader/volatile-update', () => {
     modelSelection.reconcile()
     void search.reconcile()
+    // A hand-edited host list is measured now, not at the next interval.
+    void hosts.probe({ force: true }).catch(() => undefined)
   })
 
   /**
@@ -323,6 +326,7 @@ export function apply(ctx, config) {
     balance,
     groups,
     hosts,
+    keys,
     preference: modelPreference,
     claudeRuntime,
     claudeCli,

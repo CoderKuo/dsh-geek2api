@@ -1,9 +1,10 @@
 /**
  * Route Claude models through the local Claude Code CLI.
  *
- * Geek2API's `cc` group serves its Claude models only to the official CLI, so
- * selecting one of those models runs that CLI instead of an HTTP request. The
- * other models on the route keep using the pi-ai adapter untouched — this
+ * When the Claude runtime setting is `cli`, selecting a Claude model runs the
+ * local Claude Code CLI instead of an HTTP request (useful when a key's group
+ * only serves the official CLI). Every other model, and every Claude model on
+ * the default `http` runtime, keeps using the pi-ai adapter untouched — this
  * adapter only dispatches.
  *
  * A CLI-backed turn is a *delegation*: the CLI runs its own agent loop with
@@ -39,7 +40,7 @@ export const TITLE_MODEL_ID = 'claude-haiku-4-5-20251001'
 /**
  * HTTP models whose session titles run on another model of the same route.
  * A title is a few words, so the flagship `gpt-6-astra` hands it to
- * `gpt-6.1-sol`, which the same Codex group serves; the session's own turns
+ * `gpt-6.1-sol`, which the same GPT groups serve; the session's own turns
  * are untouched.
  */
 export const TITLE_MODEL_ROUTES = Object.freeze({ 'gpt-6-astra': 'gpt-6.1-sol' })

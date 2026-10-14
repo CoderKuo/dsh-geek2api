@@ -91,16 +91,19 @@ export function parseKeyUsage(payload) {
   })
 
   if (payload.mode === 'quota_limited') {
+    // A key cap, not money: the key still spends the account wallet, which
+    // this shape does not report. Only the cap and the windows are known.
     const quota = record(payload.quota) ? payload.quota : undefined
     const expiresAt = timestamp(payload.expires_at)
+    const rateLimits = parseRateLimits(payload.rate_limits)
     return defined({
       ...common,
       mode: 'quota',
-      unlimitedQuota: quota === undefined,
+      unlimitedQuota: quota === undefined && rateLimits === undefined,
       limitUsd: usd(quota?.limit),
       usedUsd: usd(quota?.used),
       availableUsd: usd(quota?.remaining ?? payload.remaining),
-      rateLimits: parseRateLimits(payload.rate_limits),
+      rateLimits,
       expiresAt,
     })
   }
@@ -119,7 +122,13 @@ export function parseKeyUsage(payload) {
     })
   }
 
-  if (payload.mode === 'unrestricted' && record(payload) && (payload.balance !== undefined || payload.remaining !== undefined)) {
+  // A subscription group with no active subscription still answers here,
+  // with its plan name and nothing to spend.
+  if (payload.mode === 'unrestricted' && payload.balance === undefined && payload.remaining === undefined && common.planName !== undefined) {
+    return defined({ ...common, mode: 'subscription', inactive: true, unlimitedQuota: false, availableUsd: 0 })
+  }
+
+  if (payload.mode === 'unrestricted' && (payload.balance !== undefined || payload.remaining !== undefined)) {
     // The wallet has no cap of its own: what remains is all there is.
     return defined({
       ...common,
@@ -156,6 +165,7 @@ export function createBalanceReader({
   now = Date.now,
   ttlMs = DEFAULT_BALANCE_TTL_MS,
   timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS,
+  onRead,
 } = {}) {
   if (typeof listKeys !== 'function') throw new Error('Geek2API balance reader requires listKeys')
   if (typeof hosts?.withFailover !== 'function') throw new Error('Geek2API balance reader requires a host pool')
@@ -206,6 +216,11 @@ export function createBalanceReader({
           : { ...base, usage: previous.usage, stale: { fetchedAt: previous.fetchedAt, error: message } }
       }
     }))
+    try {
+      onRead?.(entries)
+    } catch {
+      // An observer must not fail the read.
+    }
     return { keys: entries, hosts: hosts.status(), fetchedAt: now() }
   }
 

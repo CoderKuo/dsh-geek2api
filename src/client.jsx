@@ -82,6 +82,7 @@ const RESET_KEYS = { monthly: 'resetMonthly', weekly: 'resetWeekly', daily: 'res
 /** What a key draws on: the shared wallet, a subscription plan, or its own quota. */
 function planLabel(usage, t) {
   if (usage?.mode === 'wallet') return t('planWallet')
+  if (usage?.mode === 'subscription' && usage.inactive === true) return fill(t('planSubscriptionInactive'), { name: usage.planName ?? '' })
   if (usage?.mode === 'subscription') return fill(t('planSubscription'), { name: usage.planName ?? '' })
   if (usage?.mode === 'quota') return t('planQuota')
   return undefined
@@ -187,13 +188,14 @@ function KeyGroups({ group, descriptions, loading, t }) {
   )
 }
 
-function KeyRow({ entry, row, group, descriptions, groupsLoading, busy, renaming, onRename, onAction, t }) {
+function KeyRow({ entry, row, group, descriptions, groupsLoading, busy, renaming, onRename, onAction, skippedUntil, t }) {
   const usage = row?.usage
   const share = remainingShare(usage)
+  const remainingLabel = usage?.mode === 'quota' ? t('keyCapRemaining') : t('keyRemaining')
   const figures = [
     usage?.unlimitedQuota === true
-      ? [t('keyRemaining'), t('keyUnlimited')]
-      : usage?.availableUsd === undefined ? undefined : [t('keyRemaining'), formatUsd(usage.availableUsd)],
+      ? [remainingLabel, t('keyUnlimited')]
+      : usage?.availableUsd === undefined ? undefined : [remainingLabel, formatUsd(usage.availableUsd)],
     usage?.usedUsd === undefined ? undefined : [t('keyUsed'), formatUsd(usage.usedUsd)],
     usage?.limitUsd === undefined ? undefined : [t('accountLimit'), formatUsd(usage.limitUsd)],
   ].filter(Boolean)
@@ -203,6 +205,11 @@ function KeyRow({ entry, row, group, descriptions, groupsLoading, busy, renaming
     resetLabel(usage?.resetPeriod, t),
     usage?.todayUsd === undefined ? undefined : `${t('keyToday')} ${formatUsd(usage.todayUsd)}`,
     usage?.expiresAt === undefined ? undefined : fill(t('keyExpires'), { date: new Date(usage.expiresAt).toLocaleDateString() }),
+    ...(Array.isArray(usage?.rateLimits) ? usage.rateLimits.map(window => fill(t('keyWindow'), {
+      window: window.window,
+      used: formatUsd(window.usedUsd) ?? '?',
+      limit: formatUsd(window.limitUsd) ?? '?',
+    })) : []),
   ].filter(Boolean).join(' · ')
   const editing = renaming?.id === entry.id
 
@@ -229,6 +236,7 @@ function KeyRow({ entry, row, group, descriptions, groupsLoading, busy, renaming
             )
             : <span className="pkc-name">{entry.label}</span>}
           {entry.active && <span className="pkc-chip" data-tone="success">{t('keyActive')}</span>}
+          {!entry.disabled && skippedUntil !== undefined && <span className="pkc-chip" data-tone="warn">{t('keySkipped')}</span>}
           {entry.disabled && <span className="pkc-chip" data-tone="danger">{entry.disabledReason ? `${t('keyDisabled')} · ${entry.disabledReason}` : t('keyDisabled')}</span>}
         </span>
         {!editing && (
@@ -377,10 +385,11 @@ function AccountsCard({ call, t }) {
                 </span>
               </div>
             </div>
-            {(totals.unread > 0 || staleCount > 0 || totals.shared > 0) && (
+            {(totals.unread > 0 || staleCount > 0 || totals.shared > 0 || totals.capped > 0) && (
               <p className="pkc-note">
                 {[
                   totals.shared > 0 ? fill(t('totalShared'), { count: totals.shared }) : undefined,
+                  totals.capped > 0 ? fill(t('totalCapped'), { count: totals.capped }) : undefined,
                   totals.unread > 0 ? fill(t('totalPartial'), { count: totals.unread }) : undefined,
                   staleCount > 0 ? fill(t('totalStale'), { count: staleCount }) : undefined,
                 ].filter(Boolean).join(' ')}
@@ -399,6 +408,7 @@ function AccountsCard({ call, t }) {
                   renaming={renaming}
                   onRename={rename}
                   onAction={mutate}
+                  skippedUntil={status?.skipped?.[entry.id]}
                   t={t}
                 />
               ))}
@@ -441,13 +451,20 @@ function HostsCard({ call, t }) {
   const [busy, setBusy] = react.useState(false)
   const [error, setError] = react.useState()
   const [draft, setDraft] = react.useState()
+  const [editing, setEditing] = react.useState(false)
 
   const run = react.useCallback((endpoint, payload) => {
     setBusy(true)
     setError(undefined)
     return call(endpoint, payload)
-      .then(setStatus)
-      .catch(failure => setError(clearMessage(failure)))
+      .then(next => {
+        setStatus(next)
+        return next
+      })
+      .catch(failure => {
+        setError(clearMessage(failure))
+        return undefined
+      })
       .finally(() => setBusy(false))
   }, [call])
 
@@ -456,7 +473,16 @@ function HostsCard({ call, t }) {
   }, [run])
 
   const hosts = Array.isArray(status?.hosts) ? status.hosts : []
-  const save = list => run('hosts/update', { apiHosts: list }).then(() => setDraft(undefined))
+  const listText = list => (Array.isArray(list) ? list.map(entry => entry.host).join('\n') : '')
+  // The editor starts from the saved list, including when it opens before the
+  // first status arrives, and shows what was saved after each save.
+  react.useEffect(() => {
+    if (editing && draft === undefined && hosts.length > 0) setDraft(listText(hosts))
+  }, [editing, draft, hosts])
+  const save = list => run('hosts/update', { apiHosts: list }).then(next => {
+    if (next !== undefined) setDraft(listText(next.hosts))
+  })
+  const draftHosts = (draft ?? '').split(/\s+/u).filter(Boolean)
   return (
     <Card
       title={t('hostsTitle')}
@@ -475,12 +501,12 @@ function HostsCard({ call, t }) {
             <span className="pkc-meta">
               {entry.coolingUntil !== undefined
                 ? t('hostsCooling')
-                : entry.latencyMs !== undefined ? `${entry.latencyMs} ms` : t('hostsDown')}
+                : entry.latencyMs !== undefined ? `${entry.latencyMs} ms` : entry.probed === false ? t('hostsUnprobed') : t('hostsDown')}
             </span>
           </div>
         ))}
       </div>
-      <details className="pkc-advanced" onToggle={event => event.currentTarget.open && draft === undefined && setDraft(hosts.map(entry => entry.host).join('\n'))}>
+      <details className="pkc-advanced" onToggle={event => setEditing(event.currentTarget.open)}>
         <summary>{t('hostsEdit')}</summary>
         <p className="pkc-note">{t('hostsEditHint')}</p>
         <textarea
@@ -491,7 +517,7 @@ function HostsCard({ call, t }) {
           onChange={event => setDraft(event.target.value)}
         />
         <div className="pkc-split">
-          <Button variant="primary" disabled={status?.writable !== true || busy} onClick={() => save((draft ?? '').split(/\s+/u).filter(Boolean))}>{t('hostsSave')}</Button>
+          <Button variant="primary" disabled={status?.writable !== true || busy || draftHosts.length === 0} onClick={() => save(draftHosts)}>{t('hostsSave')}</Button>
           <Button variant="ghost" disabled={status?.writable !== true || busy} onClick={() => save([])}>{t('hostsReset')}</Button>
         </div>
       </details>
@@ -858,7 +884,7 @@ function VersionCard({ call, t }) {
 
   const installKind = info?.install?.kind
   const showStatus = info !== undefined && updated === undefined
-  const canUpdate = showStatus && info.updateAvailable && installKind === 'npm'
+  const canUpdate = showStatus && info.updateAvailable && (info.updatable === true || (info.updatable === undefined && installKind === 'npm'))
   return (
     <Card
       title={t('versionTitle')}
@@ -879,10 +905,13 @@ function VersionCard({ call, t }) {
             {info.updateAvailable ? fill(t('versionAvailable'), { version: info.latest }) : t('versionUpToDate')}
             {info.updateAvailable && ` · ${t('versionLatest')} v${info.latest}`}
           </span>
+          {info.releaseUrl !== undefined && (
+            <a className="pkc-link" href={info.releaseUrl} target="_blank" rel="noreferrer noopener">{t('versionNotes')}</a>
+          )}
         </div>
       )}
       {showStatus && installKind === 'link' && <p className="pkc-note">{t('versionLinked')}</p>}
-      {showStatus && info.updateAvailable && installKind === 'unknown' && <p className="pkc-note">{t('versionManual')}</p>}
+      {showStatus && info.updateAvailable && !canUpdate && installKind !== 'link' && <p className="pkc-note">{t('versionManual')}</p>}
       {updateFailed && <p className="pkc-error" role="alert">{t('versionUpdateFailed')}</p>}
       {updated !== undefined && (
         <div className="pkc-callout" data-tone="info" role="status">

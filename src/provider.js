@@ -50,8 +50,8 @@ export function createGeek2APIProvider() {
       'anthropic-messages': anthropicMessagesApi(),
     },
   })
-  // Only GPT's Responses route requires prompt_cache_key here. Sending it
-  // to Grok makes the gateway return a misleading upstream API-key error.
+  // Only GPT's Responses models get prompt_cache_key; Grok upstreams have
+  // rejected the field with a misleading API-key error on other gateways.
   // pi-ai's public cacheRetention option omits this field without changing
   // the model, protocol, reasoning, session headers, or credential source.
   const requestOptions = (model, options) => model.api === 'openai-responses' && !model.id.startsWith('gpt-')

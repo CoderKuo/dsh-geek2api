@@ -56,6 +56,14 @@
   ],
   "author": "Geek2API",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/CoderKuo/dsh-geek2api.git"
+  },
+  "bugs": {
+    "url": "https://github.com/CoderKuo/dsh-geek2api/issues"
+  },
+  "homepage": "https://github.com/CoderKuo/dsh-geek2api#readme",
   "publishConfig": {
     "access": "public"
   },
