@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.1.3
+
+- Published to npm as `dsh-geek2api`: the desktop app's Plugins page can install it by name from the official registry. Updates still download from the Geek2API mirror first.
+- Added `RELEASING.md`, the release process.
+
 ## 0.1.2
 
 - Installs and updates no longer depend on reaching GitHub. Every Geek2API entry point serves a mirror of the releases at `/dsh/` (`latest.json`, each `dsh-geek2api-<version>.tgz`, and `dsh-geek2api.tgz`), synced from GitHub every 10 minutes. The version card asks the mirror first through the endpoint pool and installs the mirrored tarball; GitHub is the fallback. Install address: `https://hk.geek2api.com/dsh/dsh-geek2api.tgz`.

@@ -27,7 +27,7 @@ Installing it adds a `Geek2API` group to the model picker. No YAML and no provid
 
 ## Install
 
-1. In the desktop app, open **Plugins → Add plugin**, enter `https://hk.geek2api.com/dsh/dsh-geek2api.tgz` (Geek2API's mirror of the GitHub release, reachable from mainland networks; synced every 10 minutes) or `https://github.com/CoderKuo/dsh-geek2api/releases/latest/download/dsh-geek2api.tgz`, and install. No restart is needed for a first install. You can also download the `.tgz` from [Releases](https://github.com/CoderKuo/dsh-geek2api/releases) and install it from a local path.
+1. In the desktop app, open **Plugins → Add plugin**, enter `dsh-geek2api` with the official registry (within 24 hours of a release the bundled pnpm refuses it by name; use the mirror address then), or enter `https://hk.geek2api.com/dsh/dsh-geek2api.tgz` (Geek2API's mirror of the GitHub release, reachable from mainland networks; synced every 10 minutes) or `https://github.com/CoderKuo/dsh-geek2api/releases/latest/download/dsh-geek2api.tgz`, and install. No restart is needed for a first install. You can also download the `.tgz` from [Releases](https://github.com/CoderKuo/dsh-geek2api/releases) and install it from a local path.
 2. Open **Settings → Geek2API** and paste an API key (create one under API Keys in the Geek2API console). Add more keys for other groups; the plugin picks the right one per model.
 3. Pick a model under the `Geek2API` group.
 

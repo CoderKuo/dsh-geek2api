@@ -33,13 +33,21 @@
 
 ### 1. 安装插件
 
-打开桌面应用的**插件**页，点击**添加插件**，在**包名或地址**中填入：
+打开桌面应用的**插件**页，点击**添加插件**，在**包名或地址**中填入包名，**安装源**选**官方源**：
+
+```text
+dsh-geek2api
+```
+
+然后点击**安装**。首次安装后不用重启 DSH。
+
+> 新版本发布后的 24 小时内，DSH 的包管理器会拒绝按包名安装（报 `ERR_PNPM_MINIMUM_RELEASE_AGE_VIOLATION`）。这时改用下面的镜像地址即可；已安装的插件在设置页「更新插件」不受这个限制。
+
+也可以填安装地址：
 
 ```text
 https://hk.geek2api.com/dsh/dsh-geek2api.tgz
 ```
-
-然后点击**安装**。首次安装后不用重启 DSH。
 
 这是 Geek2API 自己的镜像，国内直连就能下载，内容与 GitHub Release 相同（每 10 分钟同步一次）；hk2 / hk3 / hk4 换掉域名里的 `hk` 也可以。能访问 GitHub 的话，也可以填 `https://github.com/CoderKuo/dsh-geek2api/releases/latest/download/dsh-geek2api.tgz`，或从 [Releases](https://github.com/CoderKuo/dsh-geek2api/releases) 下载后填本地文件路径。
 

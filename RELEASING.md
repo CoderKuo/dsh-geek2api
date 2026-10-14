@@ -1,6 +1,6 @@
 # 发版流程
 
-dsh-geek2api 通过 **GitHub Release** 发布，不发布到 npm。推送 `v*` tag 后由 GitHub Actions 自动测试、打包、创建 Release；Geek2API 各入口的 `/dsh/` 镜像会在 10 分钟内自动同步，已安装的插件随后就能在设置页一键更新。
+dsh-geek2api 通过 **GitHub Release** 和 **npm**（包名 `dsh-geek2api`，账号 dakuo）发布。推送 `v*` tag 后由 GitHub Actions 自动测试、打包、创建 Release；Geek2API 各入口的 `/dsh/` 镜像会在 10 分钟内自动同步，已安装的插件随后就能在设置页一键更新。
 
 ## 发布链路
 
@@ -92,7 +92,20 @@ gh release view v<版本> --json assets --jq '[.assets[].name]'
 # 应当看到 dsh-geek2api-<版本>.tgz 和 dsh-geek2api.tgz
 ```
 
-### 6. 确认镜像已同步
+### 6. 发布到 npm
+
+把 GitHub Actions 打出的**同一个**安装包发到 npm，保证 npm / GitHub / 镜像三处完全一致。本机 npm 全局源是国内镜像（npmmirror），登录和发布都必须显式指定官方源：
+
+```sh
+npm whoami --registry=https://registry.npmjs.org        # 未登录就先 npm login --registry=https://registry.npmjs.org
+gh release download v<版本> -p "dsh-geek2api-<版本>.tgz" -D .artifacts --clobber
+npm publish .artifacts/dsh-geek2api-<版本>.tgz --registry=https://registry.npmjs.org --access public
+npm view dsh-geek2api version --registry=https://registry.npmjs.org
+```
+
+npm 上发布过的版本号**不能删除、不能重用**。新版本发布后 24 小时内，用户在 DSH 插件页按包名安装会被 pnpm 拒绝，这段时间请用户用镜像地址安装。
+
+### 7. 确认镜像已同步
 
 镜像最多 10 分钟内同步：
 
@@ -104,7 +117,7 @@ curl -s https://hk.geek2api.com/dsh/latest.json
 
 ## 规则
 
-- **已发布的 tag 和 Release 附件不能改、不能删、不能移动。** 发现问题就发一个新的 patch 版本。
+- **已发布的 tag、Release 附件和 npm 版本不能改、不能删、不能移动。** 发现问题就发一个新的 patch 版本。
 - 发版是对外可见的操作：已安装的用户会收到更新提示。
 - 不要在 Release 附件或仓库里放任何 API Key、凭据。
 - 默认接口地址只能是 geek2api.com 的入口。
@@ -120,6 +133,8 @@ curl -s https://hk.geek2api.com/dsh/latest.json
 | 用户点「更新插件」失败 | 先确认镜像里有对应版本的 `.tgz`；用户可以在插件页用安装地址重新安装 |
 
 ## 安装地址（给用户）
+
+插件页「官方源」填包名 `dsh-geek2api`；或填镜像地址：
 
 ```text
 https://hk.geek2api.com/dsh/dsh-geek2api.tgz
