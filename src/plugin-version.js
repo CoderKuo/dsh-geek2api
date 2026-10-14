@@ -2,8 +2,10 @@
  * Version self-knowledge for the settings panel.
  *
  * The running version comes from this package. The latest version comes from
- * the GitHub releases of this repository: the newest non-draft release names
- * the version in its tag and carries the packed tarball as an asset. An
+ * the Geek2API mirror first — every entry point serves `/dsh/latest.json` and
+ * the packed tarballs, synced from GitHub, because GitHub release downloads
+ * are unreachable from mainland networks — and from the GitHub releases of
+ * this repository when no mirror answers. An
  * in-place update is offered for an install from a release tarball (or the
  * npm registry), and it installs that exact tarball with the host's own pnpm
  * — never through `dsh plugin --profile desktop`, which the desktop app
@@ -29,6 +31,22 @@ export const GITHUB_REPOSITORY = 'CoderKuo/dsh-geek2api'
 export const GITHUB_LATEST_RELEASE_URL = `https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/latest`
 /** The tarball asset a release must carry for an in-place update. */
 export const releaseAssetName = version => `${PACKAGE_NAME}-${version}.tgz`
+/** Where every Geek2API entry point serves the mirrored releases. */
+export const MIRROR_PATH = '/dsh'
+
+/**
+ * Normalize the mirror's `latest.json` as served by one entry point.
+ * @param payload - the manifest body.
+ * @param host - the entry point that served it.
+ * @returns `{ version, tarballUrl, releaseUrl }`, or undefined when unusable.
+ */
+export function parseMirrorManifest(payload, host) {
+  if (payload === null || typeof payload !== 'object' || typeof host !== 'string') return undefined
+  const version = typeof payload.version === 'string' ? payload.version : undefined
+  if (parseSemver(version) === undefined || payload.tarball !== releaseAssetName(version)) return undefined
+  const releaseUrl = typeof payload.releaseUrl === 'string' && /^https:\/\/github\.com\//u.test(payload.releaseUrl) ? payload.releaseUrl : undefined
+  return { version, tarballUrl: `${host}${MIRROR_PATH}/${payload.tarball}`, ...(releaseUrl === undefined ? {} : { releaseUrl }) }
+}
 export const DEFAULT_VERSION_TTL_MS = 5 * 60_000
 export const DEFAULT_VERSION_TIMEOUT_MS = 10_000
 export const DEFAULT_UPDATE_TIMEOUT_MS = 180_000
@@ -245,6 +263,7 @@ export function createGeek2APIPluginManager({
   env = process.env,
   ownPackageJsonUrl = new URL('../package.json', import.meta.url),
   releaseUrl = GITHUB_LATEST_RELEASE_URL,
+  hosts,
   now = Date.now,
   ttlMs = DEFAULT_VERSION_TTL_MS,
   timeoutMs = DEFAULT_VERSION_TIMEOUT_MS,
@@ -257,8 +276,29 @@ export function createGeek2APIPluginManager({
   const launcher = resolveLauncher({ argv, execPath })
   let updating = false
 
-  /** The newest release: its version, tarball asset, and page. */
-  const fetchLatest = async signal => {
+  /**
+   * The newest release from the mirror, through the entry point the pool
+   * prefers. Undefined when no entry point serves a usable manifest.
+   */
+  const fetchFromMirror = async signal => {
+    if (typeof hosts?.withFailover !== 'function') return undefined
+    try {
+      return await hosts.withFailover(async host => {
+        const response = await boundedFetch(`${host}${MIRROR_PATH}/latest.json`, { headers: { Accept: 'application/json' } }, { fetchImpl, timeoutMs, signal })
+        if (!response.ok) return undefined
+        return parseMirrorManifest(await response.json(), host)
+      }, { signal })
+    } catch (error) {
+      if (signal?.aborted) throw error
+      return undefined
+    }
+  }
+
+  /** The newest release: mirror first, then GitHub. */
+  const fetchLatest = async signal => (await fetchFromMirror(signal)) ?? fetchFromGitHub(signal)
+
+  /** The newest GitHub release: its version, tarball asset, and page. */
+  const fetchFromGitHub = async signal => {
     let response
     try {
       response = await boundedFetch(releaseUrl, {

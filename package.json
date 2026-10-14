@@ -1,6 +1,6 @@
 {
   "name": "dsh-geek2api",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "packageManager": "pnpm@10.32.1",
   "description": "Use Geek2API API keys in DeepSeek Harness: a built-in multi-protocol model route with key rotation, multi-endpoint failover, and balance display",
   "type": "module",

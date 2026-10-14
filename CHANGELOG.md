@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.2
+
+- Installs and updates no longer depend on reaching GitHub. Every Geek2API entry point serves a mirror of the releases at `/dsh/` (`latest.json`, each `dsh-geek2api-<version>.tgz`, and `dsh-geek2api.tgz`), synced from GitHub every 10 minutes. The version card asks the mirror first through the endpoint pool and installs the mirrored tarball; GitHub is the fallback. Install address: `https://hk.geek2api.com/dsh/dsh-geek2api.tgz`.
+
 ## 0.1.1
 
 - Updates come from GitHub Releases (`CoderKuo/dsh-geek2api`) instead of npm: the version card reads the latest release, links its release notes, and installs its tarball in place for installs from a release tarball (or the npm registry). The release workflow builds, tests, and attaches `dsh-geek2api-<version>.tgz` plus an unversioned `dsh-geek2api.tgz` for a stable install address.

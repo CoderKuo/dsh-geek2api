@@ -71,6 +71,6 @@ Never reuse, move, or delete a published tag or release asset. If a released ver
    git push origin v<version>
    ```
 
-   [`.github/workflows/release.yml`](.github/workflows/release.yml) refuses a tag that does not match `package.json`, runs `pnpm run check`, refuses a stale `lib/`, and creates the release with `dsh-geek2api-<version>.tgz` attached. The plugin's update check reads `releases/latest` and installs that asset.
+   [`.github/workflows/release.yml`](.github/workflows/release.yml) refuses a tag that does not match `package.json`, runs `pnpm run check`, refuses a stale `lib/`, and creates the release with `dsh-geek2api-<version>.tgz` attached. Every Geek2API entry point mirrors the release at `/dsh/` within about 10 minutes (origin timer `dsh-mirror-sync`); the plugin's update check reads the mirror's `latest.json` first and GitHub `releases/latest` as the fallback.
 
 5. Confirm the workflow succeeded and the asset is attached before announcing the release.

@@ -420,3 +420,66 @@ test('a release without its tarball is reported but not installed', async () => 
   assert.equal(info.updatable, false)
   await assert.rejects(() => manager.update(), /^Error: Geek2API plugin release has no package to install$/u)
 })
+
+/** A host pool over fixed hosts that fails over on thrown transport errors. */
+const mirrorPool = hosts => ({
+  current: () => hosts[0],
+  async withFailover(task) {
+    let last
+    for (const host of hosts) {
+      try {
+        return await task(host)
+      } catch (error) {
+        last = error
+      }
+    }
+    throw last
+  },
+})
+
+test('the mirror answers first, and the update installs its tarball', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'geek2api-version-mirror-'))
+  const ownPackageJsonUrl = await releaseInstall(root, '1.0.3')
+  const urls = []
+  const calls = []
+  const manager = createGeek2APIPluginManager({
+    env: { DSH_HOME: root },
+    ownPackageJsonUrl,
+    hosts: mirrorPool(['https://down.example', 'https://hk.example']),
+    fetchImpl: async url => {
+      urls.push(url)
+      if (url.startsWith('https://down.example')) throw new TypeError('fetch failed')
+      if (url === 'https://hk.example/dsh/latest.json') {
+        return { ok: true, status: 200, async json() { return { version: '1.0.4', tarball: `${PACKAGE_NAME}-1.0.4.tgz`, releaseUrl: releasePage('1.0.4') } } }
+      }
+      throw new Error(`unexpected ${url}`)
+    },
+    runCommand: async (call, options) => {
+      calls.push(call)
+      return installRecorder(call, options)
+    },
+  })
+  const info = await manager.read()
+  assert.equal(info.latest, '1.0.4')
+  assert.equal(info.updatable, true)
+  assert.equal(info.releaseUrl, releasePage('1.0.4'))
+  assert.equal(urls.some(url => url.includes('api.github.com')), false, 'GitHub is not asked when the mirror answers')
+  await manager.update()
+  assert.equal(calls[0].args.at(-1), `${PACKAGE_NAME}@https://hk.example/dsh/${PACKAGE_NAME}-1.0.4.tgz`)
+})
+
+test('without a usable mirror the version check falls back to GitHub', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'geek2api-version-fallback-'))
+  const ownPackageJsonUrl = await releaseInstall(root, '1.0.3')
+  const manager = createGeek2APIPluginManager({
+    env: { DSH_HOME: root },
+    ownPackageJsonUrl,
+    hosts: mirrorPool(['https://hk.example']),
+    fetchImpl: async url => {
+      if (url.endsWith('/dsh/latest.json')) return { ok: true, status: 200, async json() { return { version: '1.0.4', tarball: 'something-else.tgz' } } }
+      return registryOk('1.0.5')()
+    },
+  })
+  const info = await manager.read()
+  assert.equal(info.latest, '1.0.5')
+})

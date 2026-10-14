@@ -36,10 +36,12 @@
 打开桌面应用的**插件**页，点击**添加插件**，在**包名或地址**中填入：
 
 ```text
-https://github.com/CoderKuo/dsh-geek2api/releases/latest/download/dsh-geek2api.tgz
+https://hk.geek2api.com/dsh/dsh-geek2api.tgz
 ```
 
-然后点击**安装**。首次安装后不用重启 DSH。也可以先从 [Releases](https://github.com/CoderKuo/dsh-geek2api/releases) 下载 `.tgz`，再填本地文件路径安装。
+然后点击**安装**。首次安装后不用重启 DSH。
+
+这是 Geek2API 自己的镜像，国内直连就能下载，内容与 GitHub Release 相同（每 10 分钟同步一次）；hk2 / hk3 / hk4 换掉域名里的 `hk` 也可以。能访问 GitHub 的话，也可以填 `https://github.com/CoderKuo/dsh-geek2api/releases/latest/download/dsh-geek2api.tgz`，或从 [Releases](https://github.com/CoderKuo/dsh-geek2api/releases) 下载后填本地文件路径。
 
 ### 2. 添加 Key
 
@@ -118,7 +120,7 @@ https://github.com/CoderKuo/dsh-geek2api/releases/latest/download/dsh-geek2api.t
 
 ## 更新与卸载
 
-**更新：** 打开 **设置 → Geek2API**，「插件版本」卡片会检查 GitHub 上的最新发布；有新版本时点「更新插件」，完成后完全退出并重新打开桌面应用。「更新说明」链接到这个版本的发布页。
+**更新：** 打开 **设置 → Geek2API**，「插件版本」卡片会先从 Geek2API 镜像检查最新版本（国内直连可用），镜像不可用时再查 GitHub；有新版本时点「更新插件」，完成后完全退出并重新打开桌面应用。「更新说明」链接到这个版本的发布页。
 
 **卸载：** 用过 Geek2API 网页搜索的话，先在 **设置 → Geek2API → 网页搜索** 切回「不接管」，再到**插件**页卸载，然后重启桌面应用。否则 `cordis.patch.yml` 里会留下指向已卸载后端的配置；这时手动删掉带 `dsh-geek2api: web search provider` 标记的那一段即可。
 

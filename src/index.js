@@ -330,7 +330,7 @@ export function apply(ctx, config) {
     preference: modelPreference,
     claudeRuntime,
     claudeCli,
-    pluginManager: createGeek2APIPluginManager(),
+    pluginManager: createGeek2APIPluginManager({ hosts }),
     search,
     modelSelection,
   })
