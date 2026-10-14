@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.1
+
+- Fixed the endpoint list editor in Settings → Geek2API → Endpoints being only about 20 characters wide: it now spans the card, grows with the list, and resizes vertically.
+
 ## 0.1.0
 
 First release. Derived from [dsh-packycode-api](https://github.com/BaronCyrus/dsh-packycode-api) 1.1.7 (MIT) and rebuilt for the Geek2API gateway (sub2api).

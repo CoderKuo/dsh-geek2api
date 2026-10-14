@@ -484,7 +484,7 @@ function HostsCard({ call, t }) {
         <summary>{t('hostsEdit')}</summary>
         <p className="pkc-note">{t('hostsEditHint')}</p>
         <textarea
-          className="pkc-input pkc-mono"
+          className="pkc-input pkc-textarea pkc-mono"
           rows={Math.max(4, hosts.length + 1)}
           disabled={status?.writable !== true || busy}
           value={draft ?? ''}
