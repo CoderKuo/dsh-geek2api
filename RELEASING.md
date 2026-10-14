@@ -10,9 +10,10 @@ git push tag v<版本>
        ├─ 校验 tag 与 package.json 版本一致
        ├─ pnpm run check（全部测试 + 构建 + 打包）
        ├─ 校验已提交的 lib/ 与重新构建的结果一致
-       └─ 创建 Release，附件：
+       ├─ 创建 Release，附件：
             dsh-geek2api-<版本>.tgz   （带版本号，插件更新时安装它）
             dsh-geek2api.tgz          （固定文件名，用作安装地址）
+       └─ 把同一个安装包通过 OIDC 发到 npm（dsh-geek2api）
                     │
                     ▼  每 10 分钟同步
   Geek2API 镜像 https://hk.geek2api.com/dsh/
@@ -92,16 +93,25 @@ gh release view v<版本> --json assets --jq '[.assets[].name]'
 # 应当看到 dsh-geek2api-<版本>.tgz 和 dsh-geek2api.tgz
 ```
 
-### 6. 发布到 npm
+### 6. 确认 npm 已发布
 
-把 GitHub Actions 打出的**同一个**安装包发到 npm，保证 npm / GitHub / 镜像三处完全一致。本机 npm 全局源是国内镜像（npmmirror），登录和发布都必须显式指定官方源：
+发布流程会把**同一个**安装包通过 npm 可信发布者（OIDC）自动发到 npm，不需要令牌，也不需要两步验证：
 
 ```sh
-npm whoami --registry=https://registry.npmjs.org        # 未登录就先 npm login --registry=https://registry.npmjs.org
-gh release download v<版本> -p "dsh-geek2api-<版本>.tgz" -D .artifacts --clobber
-npm publish .artifacts/dsh-geek2api-<版本>.tgz --registry=https://registry.npmjs.org --access public
 npm view dsh-geek2api version --registry=https://registry.npmjs.org
 ```
+
+本机 npm 全局源是国内镜像（npmmirror），查 npm 时要显式指定官方源。
+
+**自动发布失败时手动补发**（账号开了两步验证，必须在自己的终端里执行，不能在 Claude Code 的 `!` 里执行）：
+
+```sh
+npm login --registry=https://registry.npmjs.org        # 未登录时
+gh release download v<版本> -p "dsh-geek2api-<版本>.tgz" -D .artifacts --clobber
+npm publish .artifacts/dsh-geek2api-<版本>.tgz --registry=https://registry.npmjs.org --access public
+```
+
+可信发布者的配置在 npm 后台 `dsh-geek2api` → Settings → Trusted Publisher：GitHub Actions、`CoderKuo` / `dsh-geek2api` / `release.yml`、Environment 留空。改了工作流文件名，这里也要跟着改。
 
 npm 上发布过的版本号**不能删除、不能重用**。新版本发布后 24 小时内，用户在 DSH 插件页按包名安装会被 pnpm 拒绝，这段时间请用户用镜像地址安装。
 

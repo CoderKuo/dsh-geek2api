@@ -7,6 +7,8 @@ on:
 
 permissions:
   contents: write
+  # npm trusted publishing (OIDC): no npm token is stored anywhere.
+  id-token: write
 
 jobs:
   release:
@@ -22,6 +24,22 @@ jobs:
         with:
           node-version: 22.20.0
           cache: pnpm
+      - name: Require an npm CLI that supports trusted publishing
+        run: |
+          node <<'EOF'
+          const { execSync } = require('node:child_process')
+          const version = () => execSync('npm --version', { encoding: 'utf8' }).trim()
+          const supports = value => {
+            const [major, minor, patch] = value.split('.').map(Number)
+            return major > 11 || (major === 11 && (minor > 5 || (minor === 5 && patch >= 1)))
+          }
+          if (!supports(version())) execSync('npm install -g npm@11', { stdio: 'inherit' })
+          if (!supports(version())) {
+            console.error(`npm ${version()} cannot publish with a trusted publisher`)
+            process.exit(1)
+          }
+          console.log(`npm ${version()}`)
+          EOF
       - name: Install locked dependencies
         run: pnpm install --frozen-lockfile
       - name: Refuse a tag that does not match package.json
@@ -53,4 +71,16 @@ jobs:
             gh release upload "$GITHUB_REF_NAME" "$ASSET" .artifacts/dsh-geek2api.tgz --clobber
           else
             gh release create "$GITHUB_REF_NAME" "$ASSET" .artifacts/dsh-geek2api.tgz --title "dsh-geek2api v${VERSION}" --notes "$NOTES"
+          fi
+      - name: Publish the same tarball to npm
+        # Trusted publishing: npm exchanges this job's OIDC token, so no
+        # NODE_AUTH_TOKEN and no setup-node registry-url (either would switch
+        # npm to token auth and skip OIDC). Re-running a tag that is already
+        # on npm is a no-op.
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          if npm view "dsh-geek2api@${VERSION}" version --registry=https://registry.npmjs.org >/dev/null 2>&1; then
+            echo "dsh-geek2api@${VERSION} is already on npm"
+          else
+            npm publish ".artifacts/dsh-geek2api-${VERSION}.tgz" --access public --registry=https://registry.npmjs.org
           fi
