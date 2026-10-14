@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.4
+
+- Releases are now published to npm automatically from the release workflow through npm trusted publishing (OIDC): the same tarball as the GitHub Release and the Geek2API mirror, with no stored npm token. No plugin behavior changes.
+
 ## 0.1.3
 
 - Published to npm as `dsh-geek2api`: the desktop app's Plugins page can install it by name from the official registry. Updates still download from the Geek2API mirror first.
