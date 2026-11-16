@@ -9,7 +9,7 @@ import { fakeCredentials, stubHostPool } from './helpers.mjs'
 import { Config } from '../src/index.js'
 
 test('search settings declare volatile fields accepted by DSH 0.2', () => {
-  for (const field of ['searchProvider', 'searchBackend', 'hiddenModels', 'apiHosts', 'claudeRuntime']) {
+  for (const field of ['searchProvider', 'searchBackend', 'hiddenModels', 'customModels', 'apiHosts', 'claudeRuntime']) {
     assert.equal(Config.dict[field].meta.volatile, true, `${field}: DSH 0.2 otherwise rejects settings.update with no volatile fields`)
   }
 })

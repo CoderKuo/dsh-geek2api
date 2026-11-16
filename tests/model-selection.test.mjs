@@ -59,7 +59,9 @@ function host({ generation = '0.2', writable = true, failWrite = false, initial 
     },
     effect(callback) { return callback() },
   }
-  const config = generation === '0.2' ? { hiddenModels: { get: () => values.hiddenModels } } : {}
+  const config = generation === '0.2'
+    ? { hiddenModels: { get: () => values.hiddenModels }, customModels: { get: () => values.customModels } }
+    : {}
   apply(ctx, config)
   return {
     seen,
@@ -182,3 +184,27 @@ test('the actual DSH LLM registry refreshes discovery atomically and keeps a pre
   assert.deepEqual((await llm.listModels('geek2api')).map(model => model.id), ['grok-4.7'])
   registration()
 })
+
+for (const generation of ['0.1', '0.2']) {
+  test(`DSH ${generation}: a custom model added in the panel reaches the picker and survives reconstruction`, async () => {
+    const env = host({ generation })
+    const { seen } = env
+    const added = await seen.handler('models/custom/update', { customModels: [{ id: 'qwen3-max', name: 'Qwen3 Max', api: 'openai-completions' }] })
+    assert.equal(added.ok, true)
+    assert.deepEqual(seen.updates.at(-1).customModels.map(entry => entry.id), ['qwen3-max'])
+    assert.equal(seen.notifications, 1, 'one registry refresh for the changed catalog')
+    assert.equal(added.value.models.at(-1).id, 'qwen3-max')
+    assert.equal(added.value.models.at(-1).custom, true)
+    assert.equal((await seen.adapter.listModels('geek2api')).at(-1).id, 'qwen3-max')
+    assert.equal((await seen.adapter.resolveModel('geek2api', 'qwen3-max')).id, 'qwen3-max')
+    assert.equal((await env.reapply().seen.adapter.listModels('geek2api')).at(-1).id, 'qwen3-max')
+
+    const refused = await seen.handler('models/custom/update', { customModels: [{ id: 'claude-opus-5-5' }] })
+    assert.equal(refused.ok, false)
+    assert.match(refused.error.message, /already a built-in model/u, 'the reason reaches the panel')
+
+    await seen.handler('models/custom/update', { customModels: [] })
+    assert.equal(seen.notifications, 2)
+    assert.ok(!(await seen.adapter.listModels('geek2api')).some(model => model.id === 'qwen3-max'))
+  })
+}

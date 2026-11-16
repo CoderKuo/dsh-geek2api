@@ -107,6 +107,7 @@ export function createGeek2APIRpc({ ring, balance, groups, hosts, keys, preferen
     }),
     'models/status': () => models().status(),
     'models/update': payload => models().update({ selectedIds: payload?.selectedIds }),
+    'models/custom/update': payload => models().updateCustom({ customModels: payload?.customModels }),
   }
 
   return async (endpoint, payload, signal) => {

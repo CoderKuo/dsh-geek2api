@@ -102,9 +102,16 @@ function remainingShare(usage) {
   return Math.max(0, Math.min(1, usage.availableUsd / usage.limitUsd))
 }
 
-/** Which catalog families a key reaches, from its per-model coverage. */
-function reachOf(coverage) {
-  return MODEL_FAMILIES.flatMap(([name, models]) => {
+const BUILT_IN_IDS = new Set(MODEL_FAMILIES.flatMap(([, models]) => models))
+
+/**
+ * Which catalog families a key reaches, from its per-model coverage. Models
+ * the user added by id form one more family of their own.
+ */
+function reachOf(coverage, customName) {
+  const custom = Object.keys(coverage ?? {}).filter(id => !BUILT_IN_IDS.has(id))
+  const families = custom.length === 0 ? MODEL_FAMILIES : [...MODEL_FAMILIES, [customName, custom]]
+  return families.flatMap(([name, models]) => {
     const known = models.filter(id => typeof coverage?.[id] === 'boolean')
     if (known.length === 0) return []
     const reached = known.filter(id => coverage[id] === true)
@@ -158,7 +165,7 @@ function KeyGroups({ group, descriptions, loading, t }) {
     return loading ? <span className="pkc-meta">{t('groupsChecking')}</span> : null
   }
   if (group.rejected === true) return <span className="pkc-error">{t('groupsRejected')}</span>
-  const reach = reachOf(group.coverage)
+  const reach = reachOf(group.coverage, t('customFamily'))
   const names = Array.isArray(group.groups) ? group.groups : []
   return (
     <>
@@ -183,8 +190,48 @@ function KeyGroups({ group, descriptions, loading, t }) {
         </div>
       )}
       {group.extraModels > 0 && <span className="pkc-meta">{fill(t('groupsExtra'), { count: group.extraModels })}</span>}
+      <KeyContextCap windows={group.contextWindows} t={t} />
+      <KeyLifetime lifetime={group.lifetime} t={t} />
       {group.stale !== undefined && <span className="pkc-meta">{t('groupsStale')}</span>}
     </>
+  )
+}
+
+/** Where the free daily key is claimed again. */
+const FREE_DAILY_SITE = 'https://www.geek2api.com'
+
+const compactTokens = value => (value >= 1000 ? `${Math.round(value / 1000)}K` : String(value))
+
+/** The per-request context cap the key's group enforces (the free DeepSeek group: 200K). */
+function KeyContextCap({ windows, t }) {
+  if (windows === undefined || windows === null) return null
+  const values = [...new Set(Object.values(windows).filter(value => Number.isInteger(value)))]
+  if (values.length === 0) return null
+  return <span className="pkc-meta">{fill(t('contextCap'), { tokens: values.map(compactTokens).join(' / ') })}</span>
+}
+
+/** When the key expires; a daily free key also links to the page that issues the next one. */
+function KeyLifetime({ lifetime, t }) {
+  if (lifetime === undefined || lifetime === null || !Number.isFinite(lifetime.expiresAt)) return null
+  const left = lifetime.expiresAt - Date.now()
+  const at = new Date(lifetime.expiresAt)
+  const pad = value => String(value).padStart(2, '0')
+  const when = `${pad(at.getMonth() + 1)}-${pad(at.getDate())} ${pad(at.getHours())}:${pad(at.getMinutes())}`
+  const hours = Math.max(0, Math.floor(left / 3_600_000))
+  const minutes = Math.max(0, Math.floor((left % 3_600_000) / 60_000))
+  if (lifetime.daily !== true) {
+    return <span className="pkc-meta">{left > 0 ? fill(t('keyExpiresAt'), { when }) : t('keyExpired')}</span>
+  }
+  const renewOpen = left <= (lifetime.renewWindowHours ?? 2) * 3_600_000
+  const href = `${FREE_DAILY_SITE}${lifetime.renewPath ?? '/free-ds'}`
+  return (
+    <span className={left <= 0 || renewOpen ? 'pkc-error' : 'pkc-meta'}>
+      {left <= 0
+        ? t('dailyKeyExpired')
+        : fill(renewOpen ? t('dailyKeyRenewOpen') : t('dailyKeyExpiresIn'), { when, hours, minutes })}
+      {' '}
+      <a href={href} target="_blank" rel="noreferrer noopener">{t('dailyKeyClaim')}</a>
+    </span>
   )
 }
 
@@ -527,7 +574,138 @@ function HostsCard({ call, t }) {
   )
 }
 
-// ── model visibility ────────────────────────────────────────────────────────
+// ── model visibility and custom models ─────────────────────────────────────
+
+const PROTOCOL_KEYS = {
+  'openai-completions': 'protocolCompletions',
+  'openai-responses': 'protocolResponses',
+  'anthropic-messages': 'protocolMessages',
+}
+const EMPTY_CUSTOM = { id: '', name: '', api: 'openai-completions', reasoning: false, image: false, contextWindow: '', maxTokens: '' }
+
+/** One user-added model: its protocol and capabilities, and a remove button. */
+function CustomModelRow({ model, disabled, onRemove, t }) {
+  const facts = [
+    t(PROTOCOL_KEYS[model.api] ?? 'protocolCompletions'),
+    model.reasoning ? t('customReasoning') : undefined,
+    model.image ? t('customImage') : undefined,
+    fill(t('customWindow'), { context: model.contextWindow.toLocaleString(), output: model.maxTokens.toLocaleString() }),
+  ].filter(Boolean).join(' · ')
+  return (
+    <div className="pkc-row">
+      <div className="pkc-row-top">
+        <span className="pkc-row-name">
+          <span className="pkc-name">{model.name === '' ? model.id : model.name}</span>
+          {model.name !== '' && <span className="pkc-meta pkc-mono">{model.id}</span>}
+        </span>
+        <span className="pkc-actions">
+          <Button variant="danger" disabled={disabled} onClick={onRemove}>{t('customRemove')}</Button>
+        </span>
+      </div>
+      <span className="pkc-meta">{facts}</span>
+    </div>
+  )
+}
+
+/** The form that adds a model by id. */
+function CustomModelForm({ disabled, onAdd, t }) {
+  const [draft, setDraft] = react.useState(EMPTY_CUSTOM)
+  const set = patch => setDraft(current => ({ ...current, ...patch }))
+  const submit = event => {
+    event.preventDefault()
+    if (disabled || draft.id.trim() === '') return
+    const entry = {
+      id: draft.id.trim(),
+      name: draft.name.trim(),
+      api: draft.api,
+      reasoning: draft.reasoning,
+      image: draft.image,
+      ...(draft.contextWindow.trim() === '' ? {} : { contextWindow: Number(draft.contextWindow) }),
+      ...(draft.maxTokens.trim() === '' ? {} : { maxTokens: Number(draft.maxTokens) }),
+    }
+    void onAdd(entry).then(saved => {
+      if (saved) setDraft(EMPTY_CUSTOM)
+    })
+  }
+  return (
+    <form className="pkc-add" onSubmit={submit}>
+      <span className="pkc-label">{t('customAddTitle')}</span>
+      <div className="pkc-form">
+        <input
+          className="pkc-input pkc-mono"
+          type="text"
+          maxLength={128}
+          spellCheck={false}
+          autoComplete="off"
+          placeholder={t('customIdPlaceholder')}
+          disabled={disabled}
+          value={draft.id}
+          onChange={event => set({ id: event.target.value })}
+        />
+        <input
+          className="pkc-input"
+          type="text"
+          maxLength={64}
+          placeholder={t('customNamePlaceholder')}
+          disabled={disabled}
+          value={draft.name}
+          onChange={event => set({ name: event.target.value })}
+        />
+      </div>
+      <div className="pkc-setting">
+        <span className="pkc-label">{t('customProtocol')}</span>
+        <div>
+          <Segmented
+            label={t('customProtocol')}
+            options={Object.keys(PROTOCOL_KEYS).map(value => ({ value, label: t(PROTOCOL_KEYS[value]) }))}
+            value={draft.api}
+            disabled={disabled}
+            onChange={api => set({ api })}
+          />
+          <p className="pkc-note">{t('customProtocolHint')}</p>
+        </div>
+        <span className="pkc-label">{t('customCapabilities')}</span>
+        <div className="pkc-form">
+          <label className="pkc-check">
+            <input type="checkbox" disabled={disabled} checked={draft.reasoning} onChange={event => set({ reasoning: event.target.checked })} />
+            {t('customReasoning')}
+          </label>
+          <label className="pkc-check">
+            <input type="checkbox" disabled={disabled} checked={draft.image} onChange={event => set({ image: event.target.checked })} />
+            {t('customImage')}
+          </label>
+        </div>
+        <span className="pkc-label">{t('customLimits')}</span>
+        <div className="pkc-form">
+          <input
+            className="pkc-input"
+            type="number"
+            min={1000}
+            step={1000}
+            placeholder={t('customContextPlaceholder')}
+            disabled={disabled}
+            value={draft.contextWindow}
+            onChange={event => set({ contextWindow: event.target.value })}
+          />
+          <input
+            className="pkc-input"
+            type="number"
+            min={1}
+            step={1000}
+            placeholder={t('customOutputPlaceholder')}
+            disabled={disabled}
+            value={draft.maxTokens}
+            onChange={event => set({ maxTokens: event.target.value })}
+          />
+        </div>
+      </div>
+      <div className="pkc-split">
+        <p className="pkc-note">{t('customReasoningHint')}</p>
+        <Button type="submit" variant="primary" disabled={disabled || draft.id.trim() === ''}>{t('customAdd')}</Button>
+      </div>
+    </form>
+  )
+}
 
 function ModelsCard({ call, t }) {
   const [state, setState] = react.useState()
@@ -545,17 +723,28 @@ function ModelsCard({ call, t }) {
   }, [call])
 
   const models = state?.models ?? []
+  const custom = Array.isArray(state?.customModels) ? state.customModels : []
   const selectedIds = models.filter(model => model.selected).map(model => model.id)
   const disabled = busy || state?.writable !== true
-  const update = ids => {
-    if (disabled) return
+  /** Run one write; resolves true when it was saved. */
+  const write = (endpoint, payload) => {
+    if (disabled) return Promise.resolve(false)
     setBusy(true)
     setError(undefined)
-    call('models/update', { selectedIds: ids })
-      .then(setState)
-      .catch(failure => setError(clearMessage(failure)))
+    return call(endpoint, payload)
+      .then(next => {
+        setState(next)
+        return true
+      })
+      .catch(failure => {
+        setError(clearMessage(failure))
+        return false
+      })
       .finally(() => setBusy(false))
   }
+  const update = ids => void write('models/update', { selectedIds: ids })
+  const saveCustom = list => write('models/custom/update', { customModels: list })
+  const full = custom.length >= (state?.maxCustomModels ?? Infinity)
 
   return (
     <Card title={t('modelsTitle')} aside={state !== undefined && <span className="pkc-meta">{fill(t('modelsCount'), { count: selectedIds.length, total: models.length })}</span>}>
@@ -575,11 +764,34 @@ function ModelsCard({ call, t }) {
                   checked={model.selected}
                   onChange={event => update(event.target.checked ? [...selectedIds, model.id] : selectedIds.filter(id => id !== model.id))}
                 />
-                <span><b>{model.name}</b><span className="pkc-meta pkc-mono">{model.id}</span></span>
+                <span>
+                  <b>{model.name}{model.custom === true && <span className="pkc-chip" data-tone="info">{t('customChip')}</span>}</b>
+                  <span className="pkc-meta pkc-mono">{model.id}</span>
+                </span>
               </label>
             ))}
           </fieldset>
           {selectedIds.length === 0 && <p className="pkc-note">{t('modelsEmpty')}</p>}
+          <details className="pkc-advanced" open={custom.length > 0 ? true : undefined}>
+            <summary>{fill(t('customTitle'), { count: custom.length })}</summary>
+            <p className="pkc-note">{t('customIntro')}</p>
+            {custom.length > 0 && (
+              <div className="pkc-list">
+                {custom.map(model => (
+                  <CustomModelRow
+                    key={model.id}
+                    model={model}
+                    disabled={disabled}
+                    onRemove={() => void saveCustom(custom.filter(entry => entry.id !== model.id))}
+                    t={t}
+                  />
+                ))}
+              </div>
+            )}
+            {full
+              ? <p className="pkc-note">{fill(t('customFull'), { count: state.maxCustomModels })}</p>
+              : <CustomModelForm disabled={disabled} onAdd={entry => saveCustom([...custom, entry])} t={t} />}
+          </details>
           {state.writable !== true && <p className="pkc-note">{t('searchNotWritable')}</p>}
         </>
       )}

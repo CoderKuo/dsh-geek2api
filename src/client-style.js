@@ -85,6 +85,9 @@ export const STYLE = `
 .pkc-model>span{display:flex;flex-direction:column;min-width:0;gap:2px}
 .pkc-model b{font-size:13px;font-weight:500}
 .pkc-models:disabled .pkc-model{opacity:.5;cursor:not-allowed}
+.pkc-model b>.pkc-chip{margin-left:6px;vertical-align:1px}
+.pkc-check{display:inline-flex;align-items:center;gap:6px;font-size:13px;cursor:pointer}
+.pkc-check>input{flex:none;width:16px;height:16px;margin:0;accent-color:var(--dsw-alias-state-business-primary)}
 
 .pkc-setting{display:grid;grid-template-columns:112px minmax(0,1fr);gap:6px 16px;align-items:start}
 .pkc-setting>.pkc-label{padding-top:5px}

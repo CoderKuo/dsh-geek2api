@@ -54,6 +54,8 @@ Keys rotate on `余额不足，请充值`, a lapsed subscription, `Invalid API k
 
 Whether a key can use a model depends on its group; trust the ✓ / ✕ in settings.
 
+**Custom models.** A model Geek2API serves but the table lacks can be added by id under **Settings → Geek2API → Visible models → Custom models**: the model id (as the key's `/v1/models` lists it; not a built-in id), an optional display name, the protocol (Chat Completions by default; Messages for Claude, Responses for GPT and Grok), whether it reasons (then off / low / medium / high are offered), whether it takes images, and optionally its context window and max output (default 128000 / 32000). It appears in the picker at once, with the same key rotation and endpoint failover, and a "Custom" column under each key shows whether that key reaches it. Up to 32. A session using a removed custom model fails with an unknown model instead of switching to another one.
+
 ## Update and uninstall
 
 The version card in **Settings → Geek2API** checks the Geek2API mirror first and GitHub when no mirror answers; update from there, then fully quit and reopen the desktop app. Before uninstalling, set web search back to "leave DSH alone" if you used it, then uninstall from the Plugins page and restart.

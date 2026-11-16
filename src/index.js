@@ -19,12 +19,12 @@ import { join } from 'node:path'
 import z from '@deepseek-ai/schemastery'
 
 import { createBalanceReader } from './balance.js'
-import { GEEK2API_MODEL_IDS } from './catalog.js'
 import { CLI_BACKED_MODEL_IDS, createClaudeCliAdapter } from './claude-adapter.js'
 import { DEFAULT_CLAUDE_MODE, createClaudeRunner } from './claude-cli.js'
 import { createClaudeCliManager } from './claude-install.js'
 import { createClaudeSearchBridge } from './claude-search-mcp.js'
 import { createClaudeCodeTool } from './claude-tool.js'
+import { CustomModelSchema } from './custom-models.js'
 import {
   CHANNEL,
   DEFAULT_API_HOSTS,
@@ -92,6 +92,11 @@ export const Config = z.object({
   searchBackend: live(z.union([...SEARCH_BACKENDS]).default(DEFAULT_SEARCH_BACKEND)),
   /** Only the picker is filtered; an existing session can keep its model. */
   hiddenModels: live(z.array(z.string()).default([])),
+  /**
+   * Models added by id, served next to the built-in catalog over the protocol
+   * each one names. Entries that cannot be served are dropped when read.
+   */
+  customModels: live(z.array(CustomModelSchema).default([])),
 })
 
 export function apply(ctx, config) {
@@ -106,11 +111,27 @@ export function apply(ctx, config) {
     searchProvider: fieldValue(config?.searchProvider),
     searchBackend: fieldValue(config?.searchBackend),
     hiddenModels: fieldValue(config?.hiddenModels),
+    customModels: fieldValue(config?.customModels),
   })
   /** Every request picks its entry point from this pool. */
   const hosts = createHostPool({ listHosts: () => normalizeHostList(fieldValue((source() ?? {}).apiHosts)), logger: ctx.logger })
   /** Whether the Claude models run through the local CLI this turn. */
   const claudeRuntime = () => (fieldValue((source() ?? {}).claudeRuntime) === 'cli' ? 'cli' : 'http')
+
+  const modelPreference = { writable: false, set: undefined }
+  let refreshModels = () => {}
+  let groups
+  /** The live catalog (built-in plus custom models) and which of it the picker shows. */
+  const modelSelection = createModelSelectionController({
+    readPreference: () => source() ?? {},
+    writePreference: patch => modelPreference.set(patch),
+    isWritable: () => modelPreference.writable === true && typeof modelPreference.set === 'function',
+    onChange: () => refreshModels(),
+    // Coverage is measured per catalog id: re-read it for a changed catalog.
+    onCatalogChange: () => groups?.invalidate(),
+    // The free DeepSeek group caps the input at 200K: narrow the model for the keys that report it.
+    contextLimitFor: modelId => groups?.contextLimitFor(modelId),
+  })
 
   // A read showing money brings back a key skipped for running out of it.
   const balance = createBalanceReader({ listKeys: () => ring.secrets(), hosts, onRead: rows => keys.noteBalances(rows) })
@@ -119,7 +140,7 @@ export function apply(ctx, config) {
    * Nothing reads it at boot: the settings panel asks for it, and a request
    * with a choice of keys waits briefly for the first reading.
    */
-  const groups = createGroupReader({ listKeys: () => ring.secrets(), hosts })
+  groups = createGroupReader({ listKeys: () => ring.secrets(), hosts, modelIds: () => modelSelection.ids() })
   const keys = createKeyChooser({ ring, groups, logger: ctx.logger, onRotated: () => balance.invalidate() })
 
   /** The session of the agent this turn runs for, when one is in scope. */
@@ -140,14 +161,6 @@ export function apply(ctx, config) {
   }
   const fallbackSessionId = `${PLUGIN_ID}-${randomUUID()}`
   const attachments = () => ctx.get?.('attachments') ?? ctx.attachments
-  const modelPreference = { writable: false, set: undefined }
-  let refreshModels = () => {}
-  const modelSelection = createModelSelectionController({
-    readPreference: () => source() ?? {},
-    writePreference: patch => modelPreference.set(patch),
-    isWritable: () => modelPreference.writable === true && typeof modelPreference.set === 'function',
-    onChange: () => refreshModels(),
-  })
 
   // ── the model route ───────────────────────────────────────────────────────
 
@@ -163,7 +176,7 @@ export function apply(ctx, config) {
     binary: () => claudeCli.binary(),
     resolveCredential: async ({ model } = {}) => {
       // A delegated run without a model runs the CLI's default, a Claude model.
-      const choice = await keys.forRun(GEEK2API_MODEL_IDS.includes(model) ? model : CLI_GROUP_MODEL)
+      const choice = await keys.forRun(modelSelection.ids().includes(model) ? model : CLI_GROUP_MODEL)
       if (choice === undefined) {
         throw new Error('Claude Code CLI needs a usable Geek2API API key; add one under Settings → Geek2API')
       }
@@ -214,7 +227,15 @@ export function apply(ctx, config) {
 
   // CLI-backed ids run the Claude Code CLI; everything else keeps the pi-ai path.
   const registration = ctx.llm.registerAdapter([PROVIDER], createClaudeCliAdapter({
-    inner: createRouteAdapter({ ring, keys, hosts, fallbackSessionId, resolveAttachments: attachments, isModelVisible: modelSelection.isVisible }),
+    inner: createRouteAdapter({
+      ring,
+      keys,
+      hosts,
+      fallbackSessionId,
+      resolveAttachments: attachments,
+      isModelVisible: modelSelection.isVisible,
+      listModels: modelSelection.models,
+    }),
     runner: claudeRunner,
     isCliModel: id => claudeRuntime() === 'cli' && CLI_BACKED_MODEL_IDS.includes(id),
     // Plan mode is "do not implement yet" for this turn, so it wins over the
@@ -402,7 +423,8 @@ export { createClaudeSearchBridge, cliSearchInstructions } from './claude-search
 export { AUTO_CLAUDE_MODE, capClaudeMode, claudeModeFor, claudeModeForSession, planModeForSession, planModeForToolExecution } from './permission.js'
 export { createBalanceReader, parseKeyUsage } from './balance.js'
 export { createHostPool, isTransportFailure, normalizeHost, normalizeHostList } from './hosts.js'
-export { GEEK2API_MODELS, GEEK2API_MODEL_IDS, modelForHost } from './catalog.js'
+export { CUSTOM_MODEL_BASES, customCatalogModel, GEEK2API_MODELS, GEEK2API_MODEL_IDS, modelForHost } from './catalog.js'
+export { CUSTOM_MODEL_PROTOCOLS, MAX_CUSTOM_MODELS, parseCustomModel, readCustomModels, validateCustomModels } from './custom-models.js'
 export {
   CHANNEL,
   DEFAULT_API_HOST,

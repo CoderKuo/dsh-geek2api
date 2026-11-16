@@ -36,14 +36,18 @@ function keyRingAuth() {
   }
 }
 
-/** Build the route's pi-ai provider (unguarded; the plugin wraps its streams). */
-export function createGeek2APIProvider() {
+/**
+ * Build the route's pi-ai provider (unguarded; the plugin wraps its streams).
+ * @param options - the models it serves: the built-in catalog unless the
+ *   caller passes the catalog with the user's custom models.
+ */
+export function createGeek2APIProvider({ models = GEEK2API_MODELS } = {}) {
   const provider = createProvider({
     id: PROVIDER,
     name: DISPLAY_NAME,
     baseUrl: DEFAULT_API_HOST,
     auth: keyRingAuth(),
-    models: GEEK2API_MODELS,
+    models,
     api: {
       'openai-completions': openAICompletionsApi(),
       'openai-responses': openAIResponsesApi(),

@@ -92,25 +92,66 @@ export function parseKeyGroups(payload) {
   return names.length === 0 ? undefined : [...new Set(names)].slice(0, MAX_GROUPS)
 }
 
+/** Smallest context window the gateway may report for a model; anything smaller is ignored as noise. */
+const MIN_REPORTED_CONTEXT_WINDOW = 8_192
+
+/**
+ * Per-model context windows from a `/v1/models` body. sub2api reports
+ * `context_window` when the key's group caps the input per request (the free
+ * DeepSeek group allows 200K although the model itself takes 1M).
+ * @param data - the `data` array of the model list.
+ * @returns model id → context window, only for models that report one.
+ */
+export function parseContextWindows(data) {
+  const windows = new Map()
+  if (!Array.isArray(data)) return windows
+  for (const item of data) {
+    const id = item?.id
+    const value = item?.context_window
+    if (typeof id === 'string' && Number.isInteger(value) && value >= MIN_REPORTED_CONTEXT_WINDOW) windows.set(id, value)
+  }
+  return windows
+}
+
+/**
+ * The key's lifetime from `/v1/usage`: when it expires and whether it is a
+ * daily free key that is re-claimed on the website.
+ * @param payload - the usage body.
+ * @returns `{ expiresAt, daily, renewWindowHours, renewPath }`, or undefined when the key never expires.
+ */
+export function parseKeyLifetime(payload) {
+  const key = record(payload?.key) ? payload.key : undefined
+  if (key === undefined || typeof key.expires_at !== 'string') return undefined
+  const expiresAt = Date.parse(key.expires_at)
+  if (!Number.isFinite(expiresAt)) return undefined
+  const daily = key.purpose === 'free_daily'
+  const renewWindowHours = Number.isInteger(key.renew_window_hours) && key.renew_window_hours > 0 ? key.renew_window_hours : 2
+  const renewPath = typeof key.renew_path === 'string' && /^\/[a-z0-9/_-]{1,64}$/iu.test(key.renew_path) ? key.renew_path : '/free-ds'
+  return Object.freeze({ expiresAt, daily, ...(daily ? { renewWindowHours, renewPath } : {}) })
+}
+
 /**
  * Which catalog models a key can reach, from its model list. A model is
  * only marked unreachable on evidence; with no list it is left unknown.
  * @param models - the key's model ids, or undefined.
+ * @param ids - the catalog's ids, built-in and custom.
  * @returns catalog model id → reachable.
  */
-export function catalogCoverage(models) {
+export function catalogCoverage(models, ids = GEEK2API_MODEL_IDS) {
   if (models === undefined) return {}
-  return Object.fromEntries(GEEK2API_MODEL_IDS.map(id => [id, models.has(id)]))
+  return Object.fromEntries(ids.map(id => [id, models.has(id)]))
 }
 
 /**
  * Cached, single-flight group reader.
- * @param options - key listing, the host pool, and transport knobs.
- * @returns `{ read, snapshot, hasReading, covers, requiredGroups, groupsOf, invalidate }`.
+ * @param options - key listing, the host pool, the catalog's ids (built-in and
+ *   custom; drop the reading when they change), and transport knobs.
+ * @returns `{ read, snapshot, hasReading, covers, contextLimitFor, lifetimeOf, requiredGroups, groupsOf, invalidate }`.
  */
 export function createGroupReader({
   listKeys,
   hosts,
+  modelIds = () => GEEK2API_MODEL_IDS,
   fetchImpl = ambientFetch,
   now = Date.now,
   ttlMs = DEFAULT_GROUP_TTL_MS,
@@ -137,7 +178,10 @@ export function createGroupReader({
     }
     const payload = await response.json()
     if (!Array.isArray(payload?.data)) throw new Error('the gateway returned an unrecognized model list')
-    return new Set(payload.data.map(item => item?.id).filter(id => typeof id === 'string'))
+    return {
+      ids: new Set(payload.data.map(item => item?.id).filter(id => typeof id === 'string')),
+      windows: parseContextWindows(payload.data),
+    }
   }
 
   /** The key's groups, when the gateway names them. */
@@ -145,7 +189,8 @@ export function createGroupReader({
     const response = await get('/v1/usage?lite=1', entry, signal)
     if (response.status === 401) throw new RejectedKeyError()
     if (!response.ok) return undefined
-    return parseKeyGroups(await response.json())
+    const payload = await response.json()
+    return { groups: parseKeyGroups(payload), lifetime: parseKeyLifetime(payload) }
   }
 
   /**
@@ -157,7 +202,8 @@ export function createGroupReader({
     const [models, groups] = await Promise.allSettled([loadModels(entry, signal), loadGroups(entry, signal)])
     if ([models, groups].some(result => result.status === 'rejected' && result.reason instanceof RejectedKeyError)) return { rejected: true }
     if (models.status === 'rejected') throw models.reason
-    return { models: models.value, groups: groups.status === 'fulfilled' ? groups.value : undefined }
+    const usage = groups.status === 'fulfilled' ? groups.value : undefined
+    return { models: models.value.ids, windows: models.value.windows, groups: usage?.groups, lifetime: usage?.lifetime }
   }
 
   const load = async signal => {
@@ -168,19 +214,22 @@ export function createGroupReader({
     }
     const readings = await mapLimited(keys, KEY_CONCURRENCY, entry => readKey(entry, signal).then(value => ({ value }), error => ({ error })))
     signal?.throwIfAborted()
+    const ids = modelIds()
     const entries = keys.map((entry, index) => {
       const { value, error } = readings[index]
       if (value?.rejected === true) {
         // Evidence, not a failed read: a rejected key reaches nothing.
         lastGood.delete(entry.id)
-        return { id: entry.id, rejected: true, coverage: Object.fromEntries(GEEK2API_MODEL_IDS.map(id => [id, false])), error: new RejectedKeyError().message }
+        return { id: entry.id, rejected: true, coverage: Object.fromEntries(ids.map(id => [id, false])), error: new RejectedKeyError().message }
       }
       if (value !== undefined) {
         const reading = {
           id: entry.id,
           ...(value.groups === undefined ? {} : { groups: value.groups }),
-          coverage: catalogCoverage(value.models),
-          extraModels: [...value.models].filter(id => !GEEK2API_MODEL_IDS.includes(id)).length,
+          ...(value.lifetime === undefined ? {} : { lifetime: value.lifetime }),
+          ...(value.windows.size === 0 ? {} : { contextWindows: Object.fromEntries(value.windows) }),
+          coverage: catalogCoverage(value.models, ids),
+          extraModels: [...value.models].filter(id => !ids.includes(id)).length,
         }
         lastGood.set(entry.id, { value: reading, fetchedAt: now() })
         return reading
@@ -214,6 +263,24 @@ export function createGroupReader({
     },
     /** Geek2API publishes no per-model group table; always undefined. */
     requiredGroups: () => undefined,
+    /**
+     * The tightest context window any key that reaches `modelId` reports, from
+     * the last reading. A key that reports none is not limited by its group.
+     * @returns the window in tokens, or undefined when no covering key reports one.
+     */
+    contextLimitFor(modelId) {
+      let limit
+      for (const entry of cache.peek()?.keys ?? []) {
+        if (entry.rejected === true || entry.coverage?.[modelId] !== true) continue
+        const value = entry.contextWindows?.[modelId]
+        if (Number.isInteger(value) && (limit === undefined || value < limit)) limit = value
+      }
+      return limit
+    },
+    /** When a key expires and whether it is a daily free key, from the last reading. */
+    lifetimeOf(keyId) {
+      return keyEntry(keyId)?.lifetime
+    },
     /** The groups the last reading found for a key. */
     groupsOf(keyId) {
       const groups = keyEntry(keyId)?.groups

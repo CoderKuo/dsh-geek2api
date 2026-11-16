@@ -227,6 +227,60 @@ export const GEEK2API_MODELS = Object.freeze([
 /** Every model id this catalog advertises, in picker order. */
 export const GEEK2API_MODEL_IDS = Object.freeze(GEEK2API_MODELS.map(item => item.id))
 
+/** The protocols a user-added model can be served over, and each one's base URL. */
+export const CUSTOM_MODEL_BASES = Object.freeze({
+  'openai-completions': OPENAI_BASE,
+  'openai-responses': OPENAI_BASE,
+  'anthropic-messages': MESSAGES_BASE,
+})
+
+/**
+ * A user-added model with reasoning: off | low | medium | high. Nothing is
+ * known about its vendor's levels, so only pi-ai's defaults are offered, less
+ * `minimal`, which most upstreams refuse; xhigh and max stay unsupported.
+ */
+const CUSTOM_REASONING_LEVELS = Object.freeze({ minimal: null })
+
+/**
+ * The catalog entry for a user-added model. The user picks the protocol; the
+ * gateway compat is the conservative one each protocol's built-in models use.
+ * @param descriptor - a validated custom-model descriptor (see custom-models.js).
+ * @returns the pi-ai model.
+ */
+export function customCatalogModel({ id, name, api, reasoning, image, contextWindow, maxTokens }) {
+  return model({
+    id,
+    name: name === '' ? id : name,
+    api,
+    baseUrl: CUSTOM_MODEL_BASES[api],
+    reasoning: reasoning === true,
+    input: Object.freeze(image === true ? ['text', 'image'] : ['text']),
+    contextWindow,
+    maxTokens,
+    ...(reasoning === true ? { thinkingLevelMap: CUSTOM_REASONING_LEVELS } : {}),
+    ...(api === 'openai-completions' ? { compat: PLAIN_COMPAT } : {}),
+  })
+}
+
+/** Share of a capped context window kept for the response; DSH compaction also reserves 64K headroom. */
+const CAPPED_OUTPUT_RATIO = 0.16
+const MIN_CAPPED_OUTPUT = 4_096
+
+/**
+ * A catalog model narrowed to the context window the gateway enforces for the
+ * keys that serve it (the free DeepSeek group takes 200K per request). The
+ * max output shrinks with it so DSH's compaction budget — window minus output
+ * minus headroom — stays positive and compaction starts well before the cap.
+ * @param catalogModel - a catalog entry.
+ * @param limit - the gateway's context window for this model, or undefined.
+ * @returns the entry unchanged when the limit is absent or not tighter; otherwise a narrowed copy.
+ */
+export function cappedCatalogModel(catalogModel, limit) {
+  if (!Number.isInteger(limit) || limit <= 0 || !(limit < catalogModel.contextWindow)) return catalogModel
+  const maxTokens = Math.min(catalogModel.maxTokens, Math.max(MIN_CAPPED_OUTPUT, Math.floor(limit * CAPPED_OUTPUT_RATIO)))
+  return Object.freeze({ ...catalogModel, contextWindow: limit, maxTokens })
+}
+
 /**
  * Point a catalog model at another entry point, keeping its path: `/v1` for
  * OpenAI-style models, the bare origin for Messages models.

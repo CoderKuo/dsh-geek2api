@@ -1,6 +1,6 @@
 /**
  * The HTTP model route: the pi-ai provider profile and the adapter that
- * serves the catalog's HTTP models (DeepSeek, GPT and Grok) with the ring's keys.
+ * serves the catalog's models, built-in and user-added, with the ring's keys.
  *
  * @module dsh-geek2api/route
  */
@@ -17,9 +17,6 @@ import { createGeek2APIProvider, guardKeyRotation } from './provider.js'
  * keeps a long session completing requests instead of being refused by a
  * gateway size cap.
  */
-/** Catalog models that take no reasoning control. */
-const NON_REASONING_MODEL_IDS = new Set(GEEK2API_MODELS.filter(model => model.reasoning !== true).map(model => model.id))
-
 const REQUEST_LIMITS = Object.freeze({
   streamIdleTimeoutMs: 10 * 60 * 1000,
   maxRequestImageBytes: 20 * 1024 * 1024,
@@ -58,8 +55,8 @@ function ringCredentialStore(ring) {
  * The provider profile this route runs on.
  *
  * `modelErrors` and `configuredMaxTokens` are required by the host adapter;
- * they stay empty because the catalog is fixed and no model carries a
- * per-request output cap of its own.
+ * they stay empty because every catalog entry is validated before it gets
+ * here and no model carries a per-request output cap of its own.
  * @param provider - the route's pi-ai provider.
  * @returns the frozen profile handed to `PiAiAdapter`.
  */
@@ -104,12 +101,17 @@ export function createGeek2APIProfile(provider) {
  *
  * Each request resolves the active key, then runs on the key the chooser picks
  * for its model; a key-level failure in the stream moves that key aside.
+ *
+ * The catalog is read on every resolution. A changed one (the user added or
+ * removed a custom model) builds a new provider and profile map, which the
+ * host adapter recognizes by identity; an operation that already captured the
+ * old snapshot keeps it.
  * @param options - the key ring and chooser, the session id used when a caller
- *   supplies none, and the attachment store image input is read from.
+ *   supplies none, the attachment store image input is read from, which
+ *   models are listed in the picker, and the live catalog.
  * @returns a `PiAiAdapter` serving the `geek2api` route.
  */
-export function createRouteAdapter({ ring, keys, hosts, fallbackSessionId, resolveAttachments, isModelVisible = () => true }) {
-  const raw = createGeek2APIProvider()
+export function createRouteAdapter({ ring, keys, hosts, fallbackSessionId, resolveAttachments, isModelVisible = () => true, listModels = () => GEEK2API_MODELS }) {
   /**
    * GPT on Responses carries a `prompt_cache_key`, which pi-ai derives from
    * the session id; it keeps one conversation on the same upstream cache.
@@ -129,19 +131,35 @@ export function createRouteAdapter({ ring, keys, hosts, fallbackSessionId, resol
    * never reached it sets that host aside, so the harness's retry of the step
    * lands on the next one.
    */
-  const guarded = method => (model, context, options) => {
-    const routed = requestOptions(model, options)
-    const host = hosts?.current()
-    const target = modelForHost(model, host)
-    return guardKeyRotation(raw[method](target, context, routed), {
-      key: routed?.apiKey,
-      modelId: model?.id,
-      onKeyFailure: keys.onKeyFailure,
-      onHostFailure: reason => hosts?.fail(host, reason),
-    })
+  const guardedProvider = models => {
+    const raw = createGeek2APIProvider({ models })
+    const guarded = method => (model, context, options) => {
+      const routed = requestOptions(model, options)
+      const host = hosts?.current()
+      const target = modelForHost(model, host)
+      return guardKeyRotation(raw[method](target, context, routed), {
+        key: routed?.apiKey,
+        modelId: model?.id,
+        onKeyFailure: keys.onKeyFailure,
+        onHostFailure: reason => hosts?.fail(host, reason),
+      })
+    }
+    return Object.freeze({ ...raw, stream: guarded('stream'), streamSimple: guarded('streamSimple') })
   }
-  const provider = Object.freeze({ ...raw, stream: guarded('stream'), streamSimple: guarded('streamSimple') })
-  const profiles = new Map([[PROVIDER, createGeek2APIProfile(provider)]])
+  /** The profile map and non-reasoning ids for the catalog last seen. */
+  let built
+  const current = () => {
+    const models = listModels()
+    if (built?.models !== models) {
+      built = {
+        models,
+        profiles: new Map([[PROVIDER, createGeek2APIProfile(guardedProvider(models))]]),
+        // Catalog models that take no reasoning control.
+        nonReasoning: new Set(models.filter(model => model.reasoning !== true).map(model => model.id)),
+      }
+    }
+    return built
+  }
 
   // Visibility affects discovery only. Resolution and prepared/in-flight
   // turns still use the complete catalog, including a now-hidden model.
@@ -156,16 +174,18 @@ export function createRouteAdapter({ ring, keys, hosts, fallbackSessionId, resol
      * so a session that names no effort does not fail before the request.
      */
     streamWithSnapshot(options, snapshot) {
-      const model = NON_REASONING_MODEL_IDS.has(options?.model) ? { ...options, reasoningEffort: 'off' } : options
+      const model = current().nonReasoning.has(options?.model) ? { ...options, reasoningEffort: 'off' } : options
       return super.streamWithSnapshot(model, snapshot)
     }
   })({
-    profiles: () => profiles,
+    profiles: () => current().profiles,
     resolveApiKey: async () => {
       const active = await keys.active()
       if (active === undefined) {
         throw new LlmError(
-          'No usable Geek2API API key: add one under Settings → Geek2API, or re-enable the keys this plugin moved past.',
+          'No usable Geek2API API key: add one under Settings → Geek2API, or re-enable the keys this plugin moved past. '
+            + 'A free DeepSeek daily key expires after 24 hours; claim the next one at https://www.geek2api.com/free-ds. '
+            + '没有可用的 Geek2API key：免费 DeepSeek 日卡 24 小时到期，请到 https://www.geek2api.com/free-ds 领取新的并粘贴到 设置 → Geek2API。',
           'MISSING_CREDENTIAL',
         )
       }
